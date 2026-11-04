@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Linux VPN Hotspot · devices</title>
+  <link rel="stylesheet" href="/fa/css/all.min.css">
+<style>
+  /* Font Awesome icons sit before text with a small gap. */
+  h1 i, h2 i, button i, summary i, .label i, .sub a i { margin-right: 6px; }
+  h1 i { color: var(--accent); }
+  :root {
+    color-scheme: dark;
+    --bg: #0f1115; --panel: #171a21; --line: #2a2f3a; --text: #e6e8ec; --dim: #8b93a3;
+    --grid: #232833; --ok: #3fb68b; --idle: #5b6372; --accent: #6ea8fe;
+    /* Series slots (validated on --panel, dark mode): 1 blue, 2 orange. */
+    --series-1: #3987e5; --series-2: #d95926;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.5 system-ui, sans-serif; background: var(--bg); color: var(--text); }
+  main { max-width: 980px; margin: 0 auto; padding: 32px 20px 60px; }
+  a { color: var(--accent); text-decoration: none; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--dim); margin: 32px 0 12px; }
+  .sub { color: var(--dim); margin: 0; }
+  .mono { font-family: ui-monospace, monospace; font-size: 12.5px; }
+
+  .picker { display: flex; flex-wrap: wrap; gap: 8px; }
+  .picker button { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 6px;
+                   padding: 7px 12px; font: inherit; cursor: pointer; display: flex; align-items: center; gap: 8px; }
+  .picker button[aria-pressed="true"] { border-color: var(--accent); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--idle); }
+  .dot.on { background: var(--ok); }
+
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+  .tile { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+  .tile .k { color: var(--dim); font-size: 12px; }
+  .tile .v { font-weight: 600; margin-top: 2px; font-variant-numeric: tabular-nums; }
+  .tile .n { color: var(--dim); font-size: 12px; margin-top: 2px; }
+
+  .chart { position: relative; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 12px 6px; }
+  .chart-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px; }
+  .chart-title { font-weight: 600; }
+  .legend { display: flex; gap: 14px; color: var(--dim); font-size: 12px; }
+  .legend span { display: flex; align-items: center; gap: 6px; }
+  .swatch { width: 14px; height: 2px; border-radius: 1px; }
+  svg { display: block; width: 100%; overflow: visible; }
+  .axis text { fill: var(--dim); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .gridline { stroke: var(--grid); stroke-width: 1; }
+  .series { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+  .end-label { font-size: 11px; fill: var(--text); }
+  .crosshair { stroke: var(--dim); stroke-width: 1; stroke-dasharray: 3 3; }
+  .hover-dot { stroke: var(--panel); stroke-width: 2; }
+  .tooltip { position: absolute; pointer-events: none; background: #0b0d11; border: 1px solid var(--line);
+             border-radius: 6px; padding: 6px 9px; font-size: 12px; white-space: nowrap; display: none; z-index: 2; }
+  .tooltip .t { color: var(--dim); margin-bottom: 2px; }
+  .tooltip .row { display: flex; align-items: center; gap: 6px; font-variant-numeric: tabular-nums; }
+  .empty { color: var(--dim); text-align: center; padding: 40px 0; }
+  .charts { display: grid; gap: 12px; }
+
+  .ranges { display: flex; gap: 6px; }
+  .ranges button { background: var(--panel); color: var(--dim); border: 1px solid var(--line); border-radius: 6px;
+                   padding: 4px 10px; font: inherit; font-size: 12px; cursor: pointer; }
+  .ranges button[aria-pressed="true"] { color: var(--text); border-color: var(--accent); }
+
+  .label-form { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }
+  .label-form label[hidden] { display: none; }
+  .label-form label { display: flex; flex-direction: column; gap: 4px; color: var(--dim); font-size: 12px; }
+  .label-form input { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; font: inherit; min-width: 200px; }
+  .label-form button, .pause-row button { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 7px 12px; font: inherit; cursor: pointer; }
+  .label-form button i, .pause-row button i, h2 i { margin-right: 6px; }
+  .icons { display: flex; gap: 4px; flex-wrap: wrap; }
+  .icons button { width: 34px; height: 34px; padding: 0; display: grid; place-items: center; background: var(--panel);
+                  color: var(--dim); border: 1px solid var(--line); border-radius: 6px; cursor: pointer; }
+  .icons button[aria-checked="true"] { color: var(--text); border-color: var(--accent); background: #1d2533; }
+  .pause-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; color: var(--dim); }
+  .pause-row .on { color: #e0a43a; }
+  .msg { min-height: 20px; margin-top: 8px; font-size: 13px; }
+  .msg.ok { color: #3fb68b; } .msg.fail { color: #e5534b; }
+  details { margin-top: 12px; }
+  summary { color: var(--dim); cursor: pointer; }
+  table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--line); margin-top: 8px; }
+  th, td { text-align: right; padding: 6px 10px; border-top: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+  th { color: var(--dim); font-weight: 500; font-size: 12px; border-top: 0; }
+  th:first-child, td:first-child { text-align: left; }
+</style>
+<link rel="stylesheet" href="/assets/layout.css">
+</head>
+<body>
+<!--#header-->
+<main>
+  <h1><i class="fa-solid fa-chart-line" aria-hidden="true"></i>Devices</h1>
+  <p class="sub">Sampled every 5 seconds on the hotspot and stored in SQLite for 30 days, so history survives restarts.
+    &nbsp;·&nbsp; <a href="/log" id="log-link"><i class="fa-solid fa-list-ul" aria-hidden="true"></i>Connect log</a></p>
+
+  <h2><i class="fa-solid fa-mobile-screen" aria-hidden="true"></i>Device</h2>
+  <div class="picker" id="picker"></div>
+
+  <div id="detail">
+    <h2><i class="fa-solid fa-pen" aria-hidden="true"></i>Name, icon &amp; internet</h2>
+    <form class="label-form" id="label-form">
+      <label>Name <input id="alias" maxlength="40" placeholder="e.g. Alex's phone"></label>
+      <label>Icon <span class="icons" id="icons" role="radiogroup" aria-label="Icon"></span></label>
+      <button type="submit"><i class="fa-solid fa-floppy-disk" aria-hidden="true"></i>Save</button>
+      <label id="admin-wrap" hidden>Admin password <input id="admin" type="password" placeholder="needed on this device"></label>
+    </form>
+    <div class="pause-row" id="pause-row"></div>
+    <div id="msg" class="msg"></div>
+    <h2><i class="fa-solid fa-gauge-high" aria-hidden="true"></i>Now</h2>
+    <div class="tiles" id="tiles"></div>
+
+    <h2><i class="fa-solid fa-signal" aria-hidden="true"></i>Connection</h2>
+    <div class="tiles" id="conn"></div>
+
+    <h2><i class="fa-solid fa-satellite-dish" aria-hidden="true"></i>Hotspot radio</h2>
+    <div class="tiles" id="radio"></div>
+
+    <div class="chart-head" style="margin-top:32px">
+      <h2 style="margin:0"><i class="fa-solid fa-chart-line" aria-hidden="true"></i>Trend</h2>
+      <div class="ranges" id="ranges">
+        <button data-min="5">5 min</button><button data-min="15">15 min</button><button data-min="60" aria-pressed="true">1 hour</button>
+        <button data-min="360">6 hours</button><button data-min="1440">24 hours</button><button data-min="10080">7 days</button>
+      </div>
+    </div>
+    <div class="tiles" id="summary" style="margin-top:12px"></div>
+    <div class="charts" style="margin-top:12px">
+      <div class="chart" id="traffic"></div>
+      <div class="chart" id="signal"></div>
+      <div class="chart" id="link"></div>
+    </div>
+
+    <details>
+      <summary><i class="fa-solid fa-table" aria-hidden="true"></i>Show as table</summary>
+      <table>
+        <thead><tr><th>Time</th><th>Download</th><th>Upload</th><th>Signal</th><th>Link speed</th></tr></thead>
+        <tbody id="table"></tbody>
+      </table>
+    </details>
+  </div>
+  <p class="empty" id="none" hidden>No devices seen yet. Connect a device to the hotspot and it shows up here within 5 seconds.</p>
+</main>
+<!--#footer-->
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+const SVGNS = 'http://www.w3.org/2000/svg';
+
+let data = null;
+let selected = new URLSearchParams(location.search).get('mac');
+let rangeMin = 60;
+
+// ---- formatting -----------------------------------------------------------
+function rateUnit(maxBits) {
+  if (maxBits >= 1e6) return { div: 1e6, name: 'Mbit/s' };
+  return { div: 1e3, name: 'kbit/s' };
+}
+const fmtRate = (b) => (b == null ? '—' : b >= 1e6 ? `${(b / 1e6).toFixed(2)} Mbit/s` : `${(b / 1e3).toFixed(1)} kbit/s`);
+const fmtBytes = (n) => (n == null ? '—' : n >= 1e9 ? `${(n / 1e9).toFixed(2)} GB` : n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${(n / 1e3).toFixed(0)} KB`);
+const fmtTime = (t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+const fmtDur = (s) => (s == null ? '—' : s >= 3600 ? `${Math.floor(s / 3600)}h ${Math.floor(s / 60) % 60}m`
+  : s >= 60 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${s}s`);
+
+const fmtNum = (n) => (n == null ? '—' : n.toLocaleString());
+const pct = (a, b) => (b ? `${((a / b) * 100).toFixed(1)}%` : '—');
+// Rough everyday reading of RSSI; shown as a word next to the number, never as color alone.
+const signalWord = (dbm) => (dbm == null ? '' : dbm >= -50 ? 'Excellent' : dbm >= -60 ? 'Good' : dbm >= -70 ? 'Fair' : 'Weak');
+const retryWord = (r) => (r == null ? '' : r < 0.1 ? 'Healthy' : r < 0.25 ? 'Some interference' : 'Heavy interference');
+
+function tilesHtml(list) {
+  return list.map(([k, v, note, mono]) => `<div class="tile"><div class="k">${esc(k)}</div>
+    <div class="v${mono ? ' mono' : ''}">${esc(v)}</div>${note ? `<div class="n">${esc(note)}</div>` : ''}</div>`).join('');
+}
+
+// "Nice" axis ticks: 4–5 round steps covering [lo, hi].
+function ticks(lo, hi, n = 4) {
+  const span = hi - lo || 1;
+  const raw = span / n;
+  const mag = 10 ** Math.floor(Math.log10(raw));
+  const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((s) => s >= raw);
+  // Snap both ends outward to a step so the data never pokes past the top gridline.
+  const out = [];
+  for (let v = Math.floor(lo / step) * step; v < hi + step - 1e-9; v += step) out.push(+v.toFixed(10));
+  return { values: out, lo: out[0], hi: out[out.length - 1] };
+}
+
+function el(name, attrs = {}, parent) {
+  const n = document.createElementNS(SVGNS, name);
+  for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+  if (parent) parent.appendChild(n);
+  return n;
+}
+
+// ---- line chart -----------------------------------------------------------
+// opts: { title, points, series: [{ key, name, color }], yFormat, tipFormat, yDomain? }
+function lineChart(root, opts) {
+  const { points, series } = opts;
+  const many = series.length > 1;
+  root.innerHTML = `
+    <div class="chart-head"><span class="chart-title">${esc(opts.title)}</span>
+      ${many ? `<div class="legend">${series.map((s) =>
+        `<span><i class="swatch" style="background:${s.color}"></i>${esc(s.name)}</span>`).join('')}</div>` : ''}
+    </div><div class="tooltip"></div>`;
+  const tip = root.querySelector('.tooltip');
+
+  const values = points.flatMap((p) => series.map((s) => p[s.key])).filter((v) => v != null);
+  if (!values.length) {
+    root.insertAdjacentHTML('beforeend', '<div class="empty">No data in this range yet</div>');
+    return;
+  }
+
+  const W = Math.max(320, root.clientWidth - 24), H = 200;
+  const m = { top: 10, right: many ? 70 : 16, bottom: 22, left: 52 };
+  const t0 = points[0].t, t1 = points[points.length - 1].t || t0 + 1;
+  const [dLo, dHi] = opts.yDomain ? opts.yDomain(values) : [0, Math.max(...values)];
+  const yt = ticks(dLo, dHi);
+  const x = (t) => m.left + ((t - t0) / (t1 - t0 || 1)) * (W - m.left - m.right);
+  const y = (v) => m.top + (1 - (v - yt.lo) / (yt.hi - yt.lo || 1)) * (H - m.top - m.bottom);
+
+  const svg = el('svg', { viewBox: `0 0 ${W} ${H}`, height: H, role: 'img', 'aria-label': opts.title });
+  const axis = el('g', { class: 'axis' }, svg);
+  for (const v of yt.values) {
+    el('line', { class: 'gridline', x1: m.left, x2: W - m.right, y1: y(v), y2: y(v) }, axis);
+    el('text', { x: m.left - 8, y: y(v) + 4, 'text-anchor': 'end' }, axis).textContent = opts.yFormat(v);
+  }
+  const xticks = 4;
+  for (let i = 0; i <= xticks; i++) {
+    const t = t0 + ((t1 - t0) * i) / xticks;
+    el('text', { x: x(t), y: H - 4, 'text-anchor': i === 0 ? 'start' : i === xticks ? 'end' : 'middle' }, axis)
+      .textContent = t1 - t0 > 24 * 3600_000
+        ? new Date(t).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })
+        : new Date(t).toLocaleTimeString([], t1 - t0 < 10 * 60_000
+          ? { hour: '2-digit', minute: '2-digit', second: '2-digit' } : { hour: '2-digit', minute: '2-digit' });
+  }
+
+  for (const s of series) {
+    // Nulls break the line (reconnects, offline gaps).
+    let d = '', pen = false;
+    for (const p of points) {
+      const v = p[s.key];
+      if (v == null) { pen = false; continue; }
+      d += `${pen ? 'L' : 'M'}${x(p.t).toFixed(1)},${y(v).toFixed(1)}`;
+      pen = true;
+    }
+    el('path', { class: 'series', d, style: `stroke:${s.color}` }, svg);
+  }
+
+  // Direct labels at each line's last value, so identity never rests on color alone.
+  // Sorted top to bottom and pushed apart so close values don't overlap.
+  if (many) {
+    const labels = series.map((s) => {
+      const last = [...points].reverse().find((p) => p[s.key] != null);
+      return last && { name: s.name, lx: x(last.t) + 6, ly: y(last[s.key]) + 4 };
+    }).filter(Boolean).sort((a, b) => a.ly - b.ly);
+    for (let i = 1; i < labels.length; i++) labels[i].ly = Math.max(labels[i].ly, labels[i - 1].ly + 13);
+    for (const l of labels) el('text', { class: 'end-label', x: l.lx, y: l.ly }, svg).textContent = l.name;
+  }
+
+  // Hover: crosshair + dots + tooltip, hit area is the whole plot.
+  const cross = el('line', { class: 'crosshair', y1: m.top, y2: H - m.bottom, visibility: 'hidden' }, svg);
+  const dots = series.map((s) => el('circle', { class: 'hover-dot', r: 4, style: `fill:${s.color}`, visibility: 'hidden' }, svg));
+  const hit = el('rect', { x: m.left, y: m.top, width: W - m.left - m.right, height: H - m.top - m.bottom, fill: 'transparent' }, svg);
+  const hide = () => { cross.setAttribute('visibility', 'hidden'); dots.forEach((d) => d.setAttribute('visibility', 'hidden')); tip.style.display = 'none'; };
+  hit.addEventListener('pointerleave', hide);
+  hit.addEventListener('pointermove', (ev) => {
+    const box = svg.getBoundingClientRect();
+    const px = ((ev.clientX - box.left) / box.width) * W;
+    const t = t0 + ((px - m.left) / (W - m.left - m.right)) * (t1 - t0);
+    let i = 0;
+    for (let j = 1; j < points.length; j++) if (Math.abs(points[j].t - t) < Math.abs(points[i].t - t)) i = j;
+    const p = points[i];
+    const cx = x(p.t);
+    cross.setAttribute('x1', cx); cross.setAttribute('x2', cx); cross.setAttribute('visibility', 'visible');
+    series.forEach((s, k) => {
+      const v = p[s.key];
+      dots[k].setAttribute('visibility', v == null ? 'hidden' : 'visible');
+      if (v != null) { dots[k].setAttribute('cx', cx); dots[k].setAttribute('cy', y(v)); }
+    });
+    tip.innerHTML = `<div class="t">${fmtTime(p.t)}</div>` + series.map((s) =>
+      `<div class="row"><i class="swatch" style="background:${s.color}"></i>${esc(s.name)}: ${opts.tipFormat(p[s.key])}</div>`).join('');
+    tip.style.display = 'block';
+    const left = (cx / W) * box.width + 12 + 12;
+    tip.style.left = `${Math.min(left, root.clientWidth - tip.offsetWidth - 8)}px`;
+    tip.style.top = '36px';
+  });
+  hit.addEventListener('pointerdown', (ev) => hit.dispatchEvent(new PointerEvent('pointermove', ev)));
+
+  root.appendChild(svg);
+}
+
+// ---- page -----------------------------------------------------------------
+function renderPicker() {
+  $('picker').innerHTML = data.devices.map((d) => `
+    <button data-mac="${esc(d.mac)}" aria-pressed="${d.mac === selected}">
+      <span class="dot ${d.online ? 'on' : ''}"></span><i class="fa-solid fa-${esc(d.icon ?? 'mobile-screen')}" aria-hidden="true"></i>${esc(d.alias ?? d.hostname ?? d.mac)}
+    </button>`).join('');
+}
+
+function render() {
+  const none = !data.devices.length;
+  $('none').hidden = !none;
+  $('detail').hidden = none;
+  if (none) { $('picker').innerHTML = ''; return; }
+  if (!data.devices.some((d) => d.mac === selected)) selected = data.devices[0].mac;
+  renderPicker();
+
+  const d = data.devices.find((x) => x.mac === selected);
+  $('log-link').href = `/log?show=conn&mac=${encodeURIComponent(selected)}&range=10080`;
+  renderControls(d);
+  const latest = [...d.points].reverse().find((p) => p.down != null) ?? {};
+  $('tiles').innerHTML = tilesHtml([
+    ['Status', d.online ? '● Online' : '○ Offline', d.online ? null : `last seen ${fmtTime(d.lastSeen)}`],
+    ['Name', d.alias ?? d.hostname ?? 'unknown', d.alias ? `DHCP name: ${d.hostname ?? '—'}` : 'from DHCP'],
+    ['IP', d.ip ?? '—', null, true],
+    ['MAC', d.mac, d.randomMac ? 'Randomized (private) MAC' : 'Hardware MAC', true],
+    ['Signal', d.signal != null ? `${d.signal} dBm` : '—', signalWord(d.signal)],
+    ['Download now', d.online ? fmtRate(latest.down) : '—'],
+    ['Upload now', d.online ? fmtRate(latest.up) : '—'],
+    ['Total down / up', `${fmtBytes(d.txBytes)} / ${fmtBytes(d.rxBytes)}`, 'this connection'],
+    ['Connected', d.online ? fmtDur(d.connectedSeconds) : '—', `first seen ${fmtTime(d.firstSeen)}`],
+  ]);
+
+  const retry = d.txPackets ? d.txRetries / d.txPackets : null;
+  $('conn').innerHTML = tilesHtml([
+    ['Wi-Fi standard', d.standard ?? '—', d.streams ? `${d.streams} spatial stream${d.streams > 1 ? 's' : ''}` : null],
+    ['Link speed to device', d.txBitrate != null ? `${d.txBitrate} Mbit/s` : '—', d.txMode],
+    ['Link speed from device', d.rxBitrate != null ? `${d.rxBitrate} Mbit/s` : '—', 'rate of the last frame received'],
+    ['Signal per antenna', d.signalChains?.length ? d.signalChains.map((v) => `${v}`).join(' / ') + ' dBm' : '—'],
+    ['Retries', pct(d.txRetries ?? 0, d.txPackets), `${fmtNum(d.txRetries)} of ${fmtNum(d.txPackets)} packets · ${retryWord(retry)}`],
+    ['Failed sends', fmtNum(d.txFailed), 'gave up after retries'],
+    ['Dropped received', fmtNum(d.rxDrops)],
+    ['Packets in / out', `${fmtNum(d.rxPackets)} / ${fmtNum(d.txPackets)}`],
+    ['Idle', d.inactiveMs != null ? `${(d.inactiveMs / 1000).toFixed(1)} s` : '—', 'since last activity'],
+    ['Security', d.mfp ? 'WPA2 + PMF' : 'WPA2', d.wmm ? 'WMM (QoS) on' : null],
+  ]);
+
+  const r = data.radio;
+  $('radio').innerHTML = tilesHtml([
+    ['SSID', r?.ssid ?? '—'],
+    ['Channel', r?.channel != null ? `${r.channel} (${r.freq} MHz)` : '—', r?.band],
+    ['Channel width', r?.width != null ? `${r.width} MHz` : '—'],
+    ['Transmit power', r?.txPower != null ? `${r.txPower} dBm` : '—'],
+    ['Gateway', r?.address ?? '—', null, true],
+  ]);
+
+  const since = Date.now() - rangeMin * 60_000;
+  const pts = d.points.filter((p) => p.t >= since);
+  const maxRate = Math.max(0, ...pts.flatMap((p) => [p.down ?? 0, p.up ?? 0]));
+  const unit = rateUnit(maxRate);
+
+  const sec = data.bucketMs / 1000; // each point is the average over one bucket
+  const col = (k) => pts.map((p) => p[k]).filter((v) => v != null);
+  const avg = (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : null);
+  const used = (k) => col(k).reduce((x, v) => x + (v * sec) / 8, 0);
+  const downs = col('down'), ups = col('up'), sigs = col('signal');
+  const label = `last ${rangeMin >= 1440 ? `${rangeMin / 1440} day${rangeMin > 1440 ? 's' : ''}` : rangeMin >= 60 ? `${rangeMin / 60} hour${rangeMin > 60 ? 's' : ''}` : `${rangeMin} min`}`;
+  $('summary').innerHTML = tilesHtml([
+    ['Data used', `${fmtBytes(used('down'))} / ${fmtBytes(used('up'))}`, `down / up, ${label}`],
+    ['Average download', fmtRate(avg(downs)), `peak ${fmtRate(downs.length ? Math.max(...downs) : null)}`],
+    ['Average upload', fmtRate(avg(ups)), `peak ${fmtRate(ups.length ? Math.max(...ups) : null)}`],
+    ['Average signal', sigs.length ? `${avg(sigs).toFixed(0)} dBm` : '—', sigs.length ? `weakest ${Math.min(...sigs)} dBm` : null],
+  ]);
+
+  lineChart($('traffic'), {
+    title: `Traffic (${unit.name})`,
+    points: pts,
+    series: [
+      { key: 'down', name: 'Download', color: 'var(--series-1)' },
+      { key: 'up', name: 'Upload', color: 'var(--series-2)' },
+    ],
+    yFormat: (v) => (v / unit.div).toFixed(unit.div === 1e6 && maxRate < 1e7 ? 1 : 0),
+    tipFormat: fmtRate,
+  });
+  lineChart($('signal'), {
+    title: 'Signal (dBm, higher is better)',
+    points: pts,
+    series: [{ key: 'signal', name: 'Signal', color: 'var(--series-1)' }],
+    yFormat: (v) => String(v),
+    tipFormat: (v) => (v == null ? '—' : `${v} dBm`),
+    yDomain: (vals) => [Math.min(-80, ...vals) - 2, Math.max(-30, ...vals) + 2],
+  });
+
+  lineChart($('link'), {
+    title: 'Link speed to device (Mbit/s)',
+    points: pts,
+    series: [{ key: 'link', name: 'Link speed', color: 'var(--series-1)' }],
+    yFormat: (v) => String(v),
+    tipFormat: (v) => (v == null ? '—' : `${v} Mbit/s`),
+  });
+
+  $('table').innerHTML = pts.slice(-60).reverse().map((p) =>
+    `<tr><td>${fmtTime(p.t)}</td><td>${fmtRate(p.down)}</td><td>${fmtRate(p.up)}</td><td>${p.signal ?? '—'}${p.signal != null ? ' dBm' : ''}</td><td>${p.link != null ? `${p.link} Mbit/s` : '—'}</td></tr>`).join('');
+}
+
+$('picker').addEventListener('click', (ev) => {
+  const b = ev.target.closest('button[data-mac]');
+  if (!b) return;
+  selected = b.dataset.mac;
+  history.replaceState(null, '', `?mac=${encodeURIComponent(selected)}`);
+  render();
+});
+
+$('ranges').addEventListener('click', (ev) => {
+  const b = ev.target.closest('button[data-min]');
+  if (!b) return;
+  rangeMin = Number(b.dataset.min);
+  $('ranges').querySelectorAll('button').forEach((x) => x.setAttribute('aria-pressed', x === b));
+  refresh();
+});
+
+// ---- name, icon, pause ---------------------------------------------------------
+const ICONS = ['mobile-screen', 'tablet-screen-button', 'laptop', 'desktop', 'tv', 'gamepad', 'headphones',
+  'clock', 'camera', 'print', 'robot', 'car', 'house', 'user', 'child', 'cat'];
+let editingFor = null;
+let pickedIcon = null;
+
+async function post(path, body) {
+  const headers = { 'Content-Type': 'application/json' };
+  if ($('admin').value) headers['X-Admin-Password'] = $('admin').value;
+  const res = await fetch(path, { method: 'POST', headers, body: JSON.stringify(body) });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || res.statusText);
+  return data;
+}
+const say = (text, cls = '') => { $('msg').textContent = text; $('msg').className = `msg ${cls}`; };
+
+function paintIcons() {
+  $('icons').innerHTML = ICONS.map((i) => `<button type="button" role="radio" aria-checked="${i === pickedIcon}"
+    data-icon="${i}" title="${i}"><i class="fa-solid fa-${i}" aria-hidden="true"></i></button>`).join('');
+}
+
+// Fill the form only when switching devices, so the 5 s refresh doesn't wipe what you type.
+function renderControls(d) {
+  if (editingFor !== d.mac) {
+    editingFor = d.mac;
+    $('alias').value = d.alias ?? '';
+    $('alias').placeholder = d.hostname ?? "e.g. Alex's phone";
+    pickedIcon = d.icon ?? null;
+    paintIcons();
+    say('');
+  }
+  const left = d.pausedUntil ? Math.max(1, Math.ceil((d.pausedUntil - Date.now()) / 60000)) : 0;
+  $('pause-row').innerHTML = left
+    ? `<span class="on"><i class="fa-solid fa-pause" aria-hidden="true"></i> Internet paused · ${left} min left</span>
+       <button type="button" data-min="0"><i class="fa-solid fa-play" aria-hidden="true"></i>Resume now</button>`
+    : `<span>Internet:</span>${[15, 30, 60, 120].map((m) =>
+        `<button type="button" data-min="${m}"><i class="fa-solid fa-pause" aria-hidden="true"></i>Pause ${m < 60 ? `${m} min` : `${m / 60} h`}</button>`).join('')}`;
+}
+
+$('icons').addEventListener('click', (ev) => {
+  const b = ev.target.closest('button[data-icon]');
+  if (!b) return;
+  pickedIcon = pickedIcon === b.dataset.icon ? null : b.dataset.icon;
+  paintIcons();
+});
+
+$('label-form').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  try {
+    await post('/api/devices/label', { mac: selected, alias: $('alias').value, icon: pickedIcon });
+    say('Saved.', 'ok');
+    editingFor = null;
+    refresh();
+  } catch (e) { say(e.message, 'fail'); }
+});
+
+$('pause-row').addEventListener('click', async (ev) => {
+  const b = ev.target.closest('button[data-min]');
+  if (!b) return;
+  const minutes = Number(b.dataset.min);
+  say('Waiting for the password dialog on the laptop…');
+  try {
+    await post('/api/devices/pause', { mac: selected, minutes });
+    say(minutes ? `Paused for ${minutes < 60 ? `${minutes} min` : `${minutes / 60} h`}.` : 'Internet is back on.', 'ok');
+    refresh();
+  } catch (e) { say(e.message, 'fail'); }
+});
+
+fetch('/api/whoami').then((r) => r.json()).then(({ local }) => { $('admin-wrap').hidden = local; });
+
+async function refresh() {
+  try {
+    const res = await fetch(`/api/devices?range=${rangeMin}`);
+    data = await res.json();
+    render();
+  } catch { /* keep the last view; the next tick retries */ }
+}
+
+window.addEventListener('resize', () => data && render());
+refresh();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>

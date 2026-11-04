@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Linux VPN Hotspot · signal hunt</title>
+<link rel="stylesheet" href="/fa/css/all.min.css">
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0f1115; --panel: #171a21; --line: #2a2f3a; --text: #e6e8ec; --dim: #8b93a3; --accent: #6ea8fe;
+    /* Status palette (reserved for state): always shown with a word, never color alone. */
+    --good: #0ca30c; --warning: #fab219; --serious: #ec835a; --critical: #d03b3b;
+    --level: var(--dim);
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.5 system-ui, sans-serif; background: var(--bg); color: var(--text); }
+  main { max-width: 560px; margin: 0 auto; padding: 24px 18px 48px; }
+  a { color: var(--accent); text-decoration: none; }
+  a i, h1 i, button i { margin-right: 6px; }
+  h1 { font-size: 20px; margin: 12px 0 4px; }
+  h1 i { color: var(--accent); }
+  .sub { color: var(--dim); margin: 0; font-size: 14px; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 16px; }
+  select, button { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 8px;
+                   padding: 9px 12px; font: inherit; }
+  select { flex: 1; min-width: 0; }
+  button[aria-pressed="true"] { border-color: var(--accent); }
+
+  .gauge { margin-top: 18px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+           padding: 22px 18px; text-align: center; border-top: 6px solid var(--level); transition: border-color .4s; }
+  .dbm { font-size: 84px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; letter-spacing: -2px; }
+  .dbm small { font-size: 22px; color: var(--dim); font-weight: 500; letter-spacing: 0; margin-left: 4px; }
+  .word { font-size: 22px; font-weight: 600; margin-top: 8px; display: inline-flex; gap: 8px; align-items: center; }
+  .word i { color: var(--level); }
+  .meter { position: relative; height: 12px; border-radius: 6px; background: #232833; margin: 18px 0 6px; overflow: hidden; }
+  .meter span { position: absolute; inset: 0 auto 0 0; background: var(--level); border-radius: 6px; transition: width .4s, background .4s; }
+  .scale { display: flex; justify-content: space-between; color: var(--dim); font-size: 12px; }
+  .delta { margin-top: 10px; min-height: 22px; color: var(--dim); }
+  .delta.up { color: var(--good); } .delta.down { color: var(--serious); }
+
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 12px; }
+  .stats > div { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px; text-align: center; }
+  .stats .k { color: var(--dim); font-size: 12px; } .stats .v { font-weight: 700; font-size: 18px; font-variant-numeric: tabular-nums; }
+  .stats .n { color: var(--dim); font-size: 11px; }
+
+  .spark { margin-top: 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px; }
+  .spark .k { color: var(--dim); font-size: 12px; margin-bottom: 4px; }
+  .spark svg { display: block; width: 100%; height: 70px; }
+  .tips { color: var(--dim); font-size: 13px; margin-top: 16px; padding-left: 18px; }
+  .offline { color: var(--critical); }
+</style>
+<link rel="stylesheet" href="/assets/layout.css">
+</head>
+<body>
+<!--#header-->
+<main>
+  <h1><i class="fa-solid fa-magnifying-glass-location" aria-hidden="true"></i>Signal hunt</h1>
+  <p class="sub">Walk around with the device and watch the number: find the best spot for it, or the best place to put the hotspot's adapter.
+    Higher (closer to 0) is better. Updates every second.</p>
+
+  <div class="row">
+    <select id="device" aria-label="Device"></select>
+    <button type="button" id="sound" aria-pressed="false"><i class="fa-solid fa-volume-xmark" aria-hidden="true"></i>Beeps off</button>
+    <button type="button" id="reset"><i class="fa-solid fa-rotate-left" aria-hidden="true"></i>Reset</button>
+  </div>
+
+  <section class="gauge" aria-live="polite">
+    <div class="dbm"><span id="dbm">—</span><small>dBm</small></div>
+    <div class="word" id="word"></div>
+    <div class="meter"><span id="bar" style="width:0"></span></div>
+    <div class="scale"><span>-90 weak</span><span>-60</span><span>-30 strong</span></div>
+    <div class="delta" id="delta"></div>
+  </section>
+
+  <div class="stats">
+    <div><div class="k">Best</div><div class="v" id="best">—</div><div class="n" id="best-at"></div></div>
+    <div><div class="k">Average</div><div class="v" id="avg">—</div><div class="n">this hunt</div></div>
+    <div><div class="k">Link speed</div><div class="v" id="link">—</div><div class="n">Mbit/s</div></div>
+  </div>
+
+  <div class="spark">
+    <div class="k">Last 60 seconds</div>
+    <svg id="spark" viewBox="0 0 300 70" preserveAspectRatio="none" aria-hidden="true"></svg>
+  </div>
+
+  <ul class="tips">
+    <li>Move slowly and pause a few seconds at each spot; the reading needs a moment to settle.</li>
+    <li>Height helps: try a shelf instead of the floor.</li>
+    <li>Walls, mirrors, fish tanks and microwaves eat 2.4 GHz signal.</li>
+  </ul>
+</main>
+<!--#footer-->
+
+<script type="module">
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+
+// Same bands as the device page; each comes with a word and an icon.
+const levels = [
+  { min: -50, word: 'Excellent', color: 'var(--good)', icon: 'face-grin-stars' },
+  { min: -60, word: 'Good', color: 'var(--good)', icon: 'face-smile' },
+  { min: -70, word: 'Fair', color: 'var(--warning)', icon: 'face-meh' },
+  { min: -80, word: 'Weak', color: 'var(--serious)', icon: 'face-frown' },
+  { min: -999, word: 'Very weak', color: 'var(--critical)', icon: 'face-dizzy' },
+];
+const levelOf = (dbm) => levels.find((l) => dbm >= l.min);
+
+let mac = new URLSearchParams(location.search).get('mac');
+let readings = []; // { t, signal }
+let best = null;
+let soundOn = false;
+
+async function loadDevices() {
+  const [devs, me] = await Promise.all([fetch('/api/devices?range=60').then((r) => r.json()), fetch('/api/whoami').then((r) => r.json())]);
+  const online = devs.devices.filter((d) => d.online);
+  // Opened on a phone that's on the hotspot? Follow that phone by default.
+  mac ??= me.mac ?? online[0]?.mac ?? null;
+  $('device').innerHTML = online.map((d) => `<option value="${esc(d.mac)}" ${d.mac === mac ? 'selected' : ''}>
+    ${esc(d.alias ?? d.hostname ?? d.mac)}${d.mac === me.mac ? ' (this device)' : ''}</option>`).join('')
+    || '<option value="">No devices online</option>';
+}
+
+function reset() {
+  readings = [];
+  best = null;
+  render(null);
+}
+
+function render(r) {
+  const vals = readings.map((x) => x.signal);
+  if (!r || r.signal == null) {
+    $('dbm').textContent = '—';
+    $('word').innerHTML = r && !r.online ? '<span class="offline"><i class="fa-solid fa-plug-circle-xmark"></i>Not connected</span>' : '';
+    $('bar').style.width = '0';
+    document.documentElement.style.setProperty('--level', 'var(--dim)');
+  } else {
+    const lv = levelOf(r.signal);
+    $('dbm').textContent = r.signal;
+    $('word').innerHTML = `<i class="fa-solid fa-${lv.icon}" aria-hidden="true"></i>${lv.word}`;
+    $('bar').style.width = `${Math.max(2, Math.min(100, ((r.signal + 90) / 60) * 100))}%`;
+    document.documentElement.style.setProperty('--level', lv.color);
+    $('link').textContent = r.link ?? '—';
+    // Compare with ~5 s ago, so the hint reflects the walk, not noise.
+    const ago = readings.find((x) => x.t >= r.t - 5500);
+    const d = ago ? r.signal - ago.signal : 0;
+    $('delta').textContent = d >= 3 ? `▲ ${d} dB better than 5 s ago, keep going this way` : d <= -3 ? `▼ ${-d} dB worse than 5 s ago, go back` : 'Steady';
+    $('delta').className = `delta ${d >= 3 ? 'up' : d <= -3 ? 'down' : ''}`;
+  }
+  $('best').textContent = best ? `${best.signal}` : '—';
+  $('best-at').textContent = best ? `at ${new Date(best.t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}` : '';
+  $('avg').textContent = vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : '—';
+
+  // Sparkline of the last 60 s on a fixed -90..-30 scale.
+  const now = Date.now();
+  const pts = readings.filter((x) => x.t >= now - 60_000)
+    .map((x) => `${(300 * (x.t - (now - 60_000))) / 60_000},${70 - ((Math.max(-90, Math.min(-30, x.signal)) + 90) / 60) * 66 - 2}`);
+  $('spark').innerHTML = pts.length > 1
+    ? `<polyline points="${pts.join(' ')}" fill="none" stroke="var(--accent)" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linejoin="round"/>`
+    : '';
+}
+
+// Geiger-style beeps: the stronger the signal, the faster and higher.
+let audio = null;
+let nextBeep = 0;
+function beep(signal) {
+  if (!soundOn || signal == null) return;
+  const now = performance.now();
+  if (now < nextBeep) return;
+  const k = Math.max(0, Math.min(1, (signal + 90) / 60));
+  nextBeep = now + 1000 - 850 * k;
+  audio ??= new AudioContext();
+  const o = audio.createOscillator(), g = audio.createGain();
+  o.frequency.value = 400 + 900 * k;
+  g.gain.setValueAtTime(0.15, audio.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.0001, audio.currentTime + 0.08);
+  o.connect(g).connect(audio.destination);
+  o.start();
+  o.stop(audio.currentTime + 0.09);
+}
+
+let latest = null;
+async function poll() {
+  if (!mac) return;
+  try {
+    const r = await fetch(`/api/signal?mac=${encodeURIComponent(mac)}`).then((x) => x.json());
+    latest = r;
+    if (r.signal != null) {
+      readings.push({ t: r.t, signal: r.signal });
+      readings = readings.filter((x) => x.t >= r.t - 10 * 60_000);
+      if (!best || r.signal > best.signal) best = { t: r.t, signal: r.signal };
+    }
+    render(r);
+  } catch { /* try again next second */ }
+}
+
+$('device').addEventListener('change', () => {
+  mac = $('device').value || null;
+  history.replaceState(null, '', mac ? `?mac=${encodeURIComponent(mac)}` : location.pathname);
+  reset();
+});
+$('reset').addEventListener('click', reset);
+$('sound').addEventListener('click', () => {
+  soundOn = !soundOn;
+  $('sound').setAttribute('aria-pressed', soundOn);
+  $('sound').innerHTML = `<i class="fa-solid fa-${soundOn ? 'volume-high' : 'volume-xmark'}" aria-hidden="true"></i>Beeps ${soundOn ? 'on' : 'off'}`;
+});
+
+await loadDevices();
+setInterval(loadDevices, 30_000);
+setInterval(poll, 1000);
+poll();
+// Beeps run on their own clock so their rhythm follows the latest reading smoothly.
+setInterval(() => beep(latest?.signal ?? null), 50);
+</script>
+</body>
+</html>

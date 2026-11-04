@@ -1,0 +1,822 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Linux VPN Hotspot</title>
+  <link rel="stylesheet" href="/fa/css/all.min.css">
+<link rel="stylesheet" href="/assets/map.css">
+<style>
+  /* Font Awesome icons sit before text with a small gap. */
+  h1 i, h2 i, button i, summary i, .label i, .sub a i { margin-right: 6px; }
+  h1 i { color: var(--accent); }
+  :root {
+    --bg: #0f1115; --panel: #171a21; --line: #2a2f3a; --text: #e6e8ec; --dim: #8b93a3;
+    --ok: #3fb68b; --todo: #e0a43a; --fail: #e5534b; --idle: #5b6372; --accent: #6ea8fe;
+  }
+  * { box-sizing: border-box; }
+  /* Elements styled display:flex (labels, buttons) still disappear when hidden. */
+  [hidden] { display: none !important; }
+  body { margin: 0; font: 14px/1.5 system-ui, sans-serif; background: var(--bg); color: var(--text); }
+  main { max-width: 980px; margin: 0 auto; padding: 32px 20px 60px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--dim); margin: 32px 0 12px; }
+  .sub { color: var(--dim); margin: 0; }
+  code, .mono { font-family: ui-monospace, monospace; font-size: 12.5px; }
+
+  .diagram { display: flex; align-items: stretch; gap: 0; overflow-x: auto; padding: 4px 0; }
+  .node { flex: 1; min-width: 150px; background: var(--panel); border: 1px solid var(--line);
+          border-top: 3px solid var(--idle); border-radius: 8px; padding: 12px; }
+  .node.ok { border-top-color: var(--ok); } .node.todo { border-top-color: var(--todo); }
+  .node.fail { border-top-color: var(--fail); }
+  .node .label { color: var(--dim); font-size: 12px; }
+  .node .name { font-weight: 600; margin: 2px 0 6px; }
+  .node .meta { color: var(--dim); font-size: 12px; }
+  .arrow { display: flex; align-items: center; color: var(--dim); padding: 0 6px; font-size: 18px; }
+
+  ol.steps { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: 8px; }
+  .steps li { display: grid; grid-template-columns: 28px 1fr; gap: 10px; padding: 12px 14px;
+              border-top: 1px solid var(--line); background: var(--panel); }
+  .steps li:first-child { border-top: 0; border-radius: 8px 8px 0 0; }
+  .steps li:last-child { border-radius: 0 0 8px 8px; }
+  .mark { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center;
+          font-size: 12px; font-weight: 700; color: #0f1115; background: var(--idle); }
+  .ok .mark { background: var(--ok); } .todo .mark { background: var(--todo); }
+  .fail .mark { background: var(--fail); }
+  .step-title { font-weight: 600; } .step-detail { margin-left: 8px; color: var(--dim); }
+  .fail .step-detail { color: var(--fail); } .todo .step-detail { color: var(--todo); }
+  .why { color: var(--dim); font-size: 12.5px; }
+  .cmd { margin-top: 6px; padding: 6px 8px; background: var(--bg); border-radius: 4px; overflow-x: auto; white-space: pre; }
+  .err { color: var(--fail); margin-top: 4px; }
+
+  form { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
+  label { display: flex; flex-direction: column; gap: 4px; color: var(--dim); font-size: 12px; }
+  /* The upstream box: one line for a proxy URL, grows when a WireGuard config is pasted. */
+  #proxy-url { width: 100%; min-height: 36px; resize: vertical; font: 12.5px/1.5 ui-monospace, monospace; }
+  .file-btn { position: relative; overflow: hidden; }
+  .file-btn input { position: absolute; inset: 0; opacity: 0; cursor: pointer; min-width: 0; }
+  input, select { background: var(--panel); color: var(--text); border: 1px solid var(--line);
+                  border-radius: 6px; padding: 7px 9px; font: inherit; min-width: 170px; }
+  button { background: var(--panel); color: var(--text); border: 1px solid var(--line);
+           border-radius: 6px; padding: 8px 14px; font: inherit; cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #0f1115; font-weight: 600; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  body.busy button:disabled { cursor: wait; }
+  .state { margin: -4px 0 12px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .state .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--idle); }
+  .state.ok .dot { background: var(--ok); } .state.todo .dot { background: var(--todo); } .state.fail .dot { background: var(--fail); }
+  .state .note { color: var(--dim); font-size: 13px; }
+  .info { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin-bottom: 12px; }
+  .info > div { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+  .info .k { color: var(--dim); font-size: 12px; }
+  .info .v { font-weight: 600; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  th, td { text-align: left; padding: 9px 12px; border-top: 1px solid var(--line); }
+  th { color: var(--dim); font-weight: 500; font-size: 12px; border-top: 0; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .empty { color: var(--dim); text-align: center; }
+  #message { margin-top: 12px; min-height: 20px; }
+  #message.ok, #proxy-message.ok { color: var(--ok); } #message.fail, #proxy-message.fail { color: var(--fail); }
+  #proxy-message { margin-top: 8px; min-height: 20px; }
+  /* Big Start call-to-action, only while the hotspot is off. Instagram-style gradient that drifts. */
+  .hero-start { display: flex; align-items: center; justify-content: center; gap: 14px; width: 100%; margin-top: 20px;
+                padding: 22px 28px; border: 0; border-radius: 16px; cursor: pointer; color: #fff;
+                font: 700 24px/1.2 system-ui, sans-serif; letter-spacing: .01em; text-shadow: 0 1px 2px rgba(0, 0, 0, .25);
+                background: linear-gradient(115deg, #feda75, #fa7e1e, #d62976, #962fbf, #4f5bd5, #962fbf, #d62976, #fa7e1e, #feda75);
+                background-size: 300% 100%; animation: hero-flow 6s linear infinite, hero-glow 2.4s ease-in-out infinite;
+                transition: transform .15s; }
+  .hero-start i { font-size: 26px; }
+  .hero-start small { display: block; font: 500 13px/1.3 system-ui, sans-serif; opacity: .9; text-shadow: none; }
+  .hero-start:hover { transform: translateY(-2px) scale(1.01); }
+  .hero-start:active { transform: scale(.99); }
+  .hero-start:focus-visible { outline: 3px solid #fff; outline-offset: 3px; }
+  .hero-start:disabled { opacity: .85; cursor: wait; }
+  @keyframes hero-flow { to { background-position: 300% 0; } }
+  @keyframes hero-glow { 0%, 100% { box-shadow: 0 6px 24px -6px rgba(214, 41, 118, .55); }
+                         50% { box-shadow: 0 10px 40px -4px rgba(150, 47, 191, .8); } }
+  @media (prefers-reduced-motion: reduce) { .hero-start { animation: none; background-size: 100% 100%; } }
+  .hero-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .hero-actions { display: flex; gap: 8px; }
+  .btn { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 6px;
+         padding: 6px 12px; font-size: 13px; text-decoration: none; display: inline-flex; align-items: center; }
+  .btn i, #nm-sound i, #nm-sites i, #qr-full i { margin-right: 6px; }
+  #nm-sound, #nm-sites { font-size: 13px; padding: 6px 12px; }
+
+  .today-grid { display: grid; grid-template-columns: 1fr 260px; gap: 24px; align-items: start; }
+  @media (max-width: 760px) { .today-grid { grid-template-columns: 1fr; } }
+  .medal { font-size: 18px; }
+  .bar { height: 6px; border-radius: 3px; background: #3987e5; margin-top: 4px; min-width: 2px; }
+  .lb-name i { margin-right: 6px; color: var(--dim); }
+  .qr-card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px; text-align: center; }
+  .qr { background: #fff; border-radius: 6px; padding: 8px; }
+  .qr svg { display: block; width: 100%; height: auto; }
+  .qr-ssid { font-weight: 600; margin-top: 10px; }
+  .qr-pass { color: var(--dim); font-size: 13px; margin: 2px 0 10px; }
+  .link-btn { background: none; border: 0; color: var(--accent); padding: 0 4px; font-size: 13px; cursor: pointer; }
+  .qr-overlay { position: fixed; inset: 0; background: rgba(8, 9, 12, .96); z-index: 60; display: grid;
+                place-content: center; justify-items: center; gap: 12px; cursor: zoom-out; color: var(--dim); }
+  .qr-overlay[hidden] { display: none; }
+  .fw-modal { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-top: 3px solid var(--fail);
+              border-radius: 10px; padding: 20px 22px; max-width: 480px; }
+  .fw-modal::backdrop { background: rgba(8, 9, 12, .8); }
+  .fw-modal h3 { margin: 0 0 8px; font-size: 17px; }
+  .fw-modal h3 i { color: var(--fail); margin-right: 8px; }
+  .fw-modal p { color: var(--dim); margin: 8px 0; }
+  .fw-modal ul { margin: 8px 0 12px; padding-left: 20px; }
+  .fw-modal .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; }
+  .fw-modal .primary { border-color: var(--accent); }
+  .fw-modal input { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--line);
+                    border-radius: 6px; padding: 7px 10px; font: inherit; }
+  #fw-message.fail { color: var(--fail); } #fw-message.ok { color: var(--ok); }
+  .qr-big { background: #fff; padding: 16px; border-radius: 12px; width: min(80vw, 70vh); }
+  .qr-big svg { display: block; width: 100%; height: auto; }
+  .qr-big-ssid { color: var(--text); font-size: 22px; font-weight: 600; }
+  .pause-sel { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; font: inherit; font-size: 12px; }
+  .paused-tag { color: var(--todo); font-size: 12px; white-space: nowrap; }
+  .paused-tag button { margin-left: 6px; padding: 2px 8px; font-size: 12px; }
+  .ranges { display: inline-flex; gap: 6px; }
+  .ranges button { padding: 3px 9px; font-size: 12px; color: var(--dim); }
+  .ranges button[aria-pressed="true"] { color: var(--text); border-color: var(--accent); }
+  details summary { color: var(--dim); cursor: pointer; }
+  td.wrap { white-space: normal; word-break: break-all; }
+</style>
+<link rel="stylesheet" href="/assets/layout.css">
+</head>
+<body>
+<!--#header-->
+<main>
+  <header id="map">
+    <div class="hero-top">
+      <h1><i class="fa-solid fa-diagram-project" aria-hidden="true"></i>Overview</h1>
+      <div class="hero-actions">
+        <button type="button" id="nm-sites" aria-pressed="false"></button>
+        <button type="button" id="nm-sound" aria-pressed="false"></button>
+      </div>
+    </div>
+    <p class="sub">One card joins the router, the other broadcasts a hotspot. Closer to the center = stronger signal,
+      bigger circle = more traffic, moving dots = data flowing. Refreshes every 5 seconds.</p>
+    <button type="button" class="hero-start" id="hero-start" hidden>
+      <i class="fa-solid fa-power-off" aria-hidden="true"></i>
+      <span>Start hotspot<small id="hero-start-note"></small></span>
+    </button>
+    <div class="nm-summary" id="nm-summary" style="margin-top:20px"></div>
+    <div class="nm-map" id="nm-map" style="height:540px;margin-top:12px">
+      <svg id="nm-lines" aria-hidden="true"></svg>
+      <svg id="nm-flow" aria-hidden="true"></svg>
+      <div class="nm-tooltip" id="nm-tip"></div>
+    </div>
+  <div class="nm-legend">
+    <span><i class="nm-sw" style="background:conic-gradient(var(--c1) 0 25%, var(--c2) 0 50%, var(--c3) 0 75%, var(--c7) 0)"></i>Online (one color per device)</span>
+    <span><i class="fa-solid fa-circle" style="font-size:7px"></i><i class="fa-solid fa-circle" style="font-size:7px"></i>Moving dots = data: outward = download, inward = upload; faster and denser = more traffic</span>
+    <span><i class="nm-sw" style="border:2px dashed var(--idle)"></i>Offline (last hour)</span>
+    <span><i class="fa-solid fa-circle" style="font-size:6px"></i><i class="fa-solid fa-circle" style="font-size:12px"></i>Circle size = current traffic</span>
+    <span><i class="fa-regular fa-circle"></i>Rings = signal strength (dBm)</span>
+    <span>“4 ms” on a line = ping time (amber slow, red very slow)</span>
+    <span><i class="nm-sw" style="background:var(--fail)"></i>Count = proxy rejections (last hour)</span>
+    <span><i class="nm-sw" style="outline:2px dashed var(--todo);outline-offset:1px"></i>Many retries (interference)</span>
+    <span>Hover anything for details</span>
+  </div>
+  </header>
+
+  <section class="today-grid">
+    <div>
+      <h2><i class="fa-solid fa-calendar-day" aria-hidden="true"></i>Today</h2>
+      <div class="info" id="today"></div>
+      <h2><i class="fa-solid fa-trophy" aria-hidden="true"></i>Leaderboard
+        <span class="ranges" id="lb-ranges" style="float:right;text-transform:none;letter-spacing:0">
+          <button data-range="today" aria-pressed="true">Today</button><button data-range="week">7 days</button>
+        </span></h2>
+      <table>
+        <thead><tr><th style="width:44px">#</th><th>Device</th><th>Downloaded</th><th class="num">Uploaded</th><th class="num">Peak</th></tr></thead>
+        <tbody id="leaders"></tbody>
+      </table>
+    </div>
+    <div>
+      <h2><i class="fa-solid fa-qrcode" aria-hidden="true"></i>Join the hotspot</h2>
+      <div class="qr-card">
+        <div class="qr" id="qr"></div>
+        <div class="qr-ssid" id="qr-ssid"></div>
+        <div class="qr-pass">Password: <span class="mono" id="qr-pass">••••••••</span>
+          <button type="button" id="qr-reveal" class="link-btn">show</button></div>
+        <button type="button" id="qr-full"><i class="fa-solid fa-expand" aria-hidden="true"></i>Full screen</button>
+        <p class="why">Point a phone camera at the code to join without typing the password.</p>
+      </div>
+    </div>
+  </section>
+
+  <div class="qr-overlay" id="qr-overlay" hidden>
+    <div class="qr-big" id="qr-big"></div>
+    <div class="qr-big-ssid" id="qr-big-ssid"></div>
+    <p>Scan to join · click anywhere to close</p>
+  </div>
+
+  <dialog class="fw-modal" id="fw-modal" aria-labelledby="fw-title">
+    <h3 id="fw-title"><i class="fa-solid fa-shield-halved" aria-hidden="true"></i>Network rules need fixing</h3>
+    <p>The hotspot runs on <b id="fw-card"></b>, but the firewall and redirect rules don't match it, so phones may get
+      no IP address ("couldn't get IP address") or skip the proxy. Rules are tied to the card's name (USB cards get a new
+      name in another port) and redirects are lost on reboot. Not in place:</p>
+    <ul id="fw-missing"></ul>
+    <label id="fw-admin-field" hidden>Admin password <input type="password" id="fw-admin" autocomplete="current-password"></label>
+    <p id="fw-message">Fixing needs root: a password dialog appears on the laptop.</p>
+    <div class="actions">
+      <button type="button" id="fw-later">Later</button>
+      <button type="button" id="fw-fix" class="primary"><i class="fa-solid fa-wrench" aria-hidden="true"></i>Fix firewall</button>
+    </div>
+  </dialog>
+
+  <h2><i class="fa-solid fa-network-wired" aria-hidden="true"></i>Network
+    <button type="button" id="swap" style="float:right;text-transform:none;letter-spacing:0;font-size:13px;padding:5px 12px">
+      <i class="fa-solid fa-right-left" aria-hidden="true"></i>Swap cards</button></h2>
+  <div class="diagram" id="diagram"></div>
+
+  <h2><i class="fa-solid fa-circle-info" aria-hidden="true"></i>Hotspot info <a href="/device" style="float:right;text-transform:none;letter-spacing:0;color:var(--accent);text-decoration:none"><i class="fa-solid fa-chart-line" aria-hidden="true"></i> Device trends</a></h2>
+  <div class="info" id="info"></div>
+  <table>
+    <thead><tr><th>Device</th><th>IP</th><th>MAC</th><th class="num">Signal</th>
+      <th class="num">Connected</th><th class="num">Down</th><th class="num">Up</th><th>Internet</th></tr></thead>
+    <tbody id="clients"></tbody>
+  </table>
+
+  <h2><i class="fa-solid fa-list-check" aria-hidden="true"></i>Flow</h2>
+  <ol class="steps" id="steps"></ol>
+
+  <h2><i class="fa-solid fa-wifi" aria-hidden="true"></i>Hotspot</h2>
+  <p class="state" id="hotspot-state"></p>
+  <form id="form">
+    <label>SSID <input name="ssid" value="Omarchy-Hotspot" required></label>
+    <label>Password <input name="password" type="password" minlength="8" placeholder="random if empty" id="pw"></label>
+    <label>Gateway <input name="gateway" value="10.0.0.1" pattern="\d+\.\d+\.\d+\.\d+" required></label>
+    <label>Band
+      <select name="band"><option value="bg">2.4 GHz</option><option value="a">5 GHz</option></select>
+    </label>
+    <label id="admin-field" hidden>Admin password
+      <input id="admin" type="password" autocomplete="current-password" placeholder="needed on this device">
+    </label>
+    <button type="submit" class="primary" id="start"><i class="fa-solid fa-play" aria-hidden="true"></i>Start</button>
+    <button type="button" id="stop"><i class="fa-solid fa-stop" aria-hidden="true"></i>Stop</button>
+    <button type="button" id="refresh"><i class="fa-solid fa-rotate" aria-hidden="true"></i>Re-check flow</button>
+  </form>
+  <div id="message"></div>
+
+  <h2><i class="fa-solid fa-globe" aria-hidden="true"></i>VPN / proxy</h2>
+  <p class="state" id="proxy-state"></p>
+  <div class="info" id="proxy-info"></div>
+  <form id="proxy-form">
+    <label style="flex:1">Proxy URL or WireGuard config
+      <textarea name="url" id="proxy-url" rows="1" spellcheck="false" autocomplete="off"
+        style="background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:7px 9px"></textarea>
+    </label>
+    <span class="btn file-btn" role="button"><i class="fa-solid fa-file-import" aria-hidden="true"></i>Load .conf
+      <input type="file" id="proxy-file" accept=".conf,text/plain" aria-label="Load a WireGuard .conf file"></span>
+    <button type="submit" id="proxy-save"><i class="fa-solid fa-floppy-disk" aria-hidden="true"></i>Save</button>
+    <button type="button" id="proxy-test"><i class="fa-solid fa-flask" aria-hidden="true"></i>Test</button>
+    <button type="button" class="primary" id="proxy-on"><i class="fa-solid fa-power-off" aria-hidden="true"></i>Enable</button>
+    <button type="button" id="proxy-off"><i class="fa-solid fa-ban" aria-hidden="true"></i>Disable</button>
+  </form>
+  <p class="why" style="margin-top:8px">Hotspot clients go through this VPN or proxy automatically: nothing to install on the
+    phone, and the phone sees no VPN. Paste a <b>SOCKS5 / HTTP / HTTPS proxy URL</b>, or a <b>WireGuard config</b> from your
+    VPN provider (paste it or use Load .conf). Keys stay on the laptop. Turning it on or off needs root: a password dialog appears on the laptop.</p>
+  <div id="proxy-message"></div>
+
+  <h2><i class="fa-solid fa-ban" aria-hidden="true"></i>Rejected connections
+    <span class="ranges" id="err-ranges" style="float:right;text-transform:none;letter-spacing:0">
+      <button data-min="60">1 hour</button><button data-min="1440" aria-pressed="true">24 hours</button><button data-min="10080">7 days</button>
+    </span></h2>
+  <p class="why" style="margin:-4px 0 12px">Connections the upstream proxy refused or could not complete, recorded in SQLite from sing-box's log.</p>
+  <div class="info" id="err-info"></div>
+  <table>
+    <thead><tr><th>Site</th><th class="num">Port</th><th>Reason</th><th class="num">Count</th><th>Devices</th><th class="num">Last</th></tr></thead>
+    <tbody id="err-sites"></tbody>
+  </table>
+  <details style="margin-top:10px">
+    <summary><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i>Latest 100</summary>
+    <table style="margin-top:8px">
+      <thead><tr><th>Time</th><th>Device</th><th>Site</th><th>Reason</th><th>Proxy said</th></tr></thead>
+      <tbody id="err-recent"></tbody>
+    </table>
+  </details>
+</main>
+<!--#footer-->
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+const marks = { ok: '<i class="fa-solid fa-check"></i>', todo: '<i class="fa-solid fa-arrow-right"></i>',
+  fail: '<i class="fa-solid fa-xmark"></i>', pending: '<i class="fa-solid fa-ellipsis"></i>' };
+
+async function api(method, path, body) {
+  const headers = body ? { 'Content-Type': 'application/json' } : {};
+  // Only hotspot clients need it; the field has no name so it never goes into the body.
+  if (method === 'POST' && $('admin').value) headers['X-Admin-Password'] = $('admin').value;
+  const res = await fetch(path, { method, headers, body: body ? JSON.stringify(body) : undefined });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || res.statusText);
+  return data;
+}
+
+function node(label, name, meta, state, icon) {
+  return `<div class="node ${state}"><div class="label"><i class="fa-solid fa-${icon}" aria-hidden="true"></i>${esc(label)}</div>
+    <div class="name">${esc(name)}</div><div class="meta">${meta}</div></div>`;
+}
+
+function renderDiagram({ cards, defaultRoute, hotspot }) {
+  const uplink = cards.find((c) => c.device === defaultRoute) ?? cards.find((c) => c.role === 'client');
+  const ap = cards.find((c) => c.role === 'hotspot') ?? cards.find((c) => c !== uplink);
+  const card = (c) => (c ? `${c.device}${c.usb ? ' (USB)' : ''}` : 'none');
+  const l = uplink?.link;
+  const clients = ap?.clients ?? [];
+
+  $('diagram').innerHTML = [
+    node('Router', l?.ssid ?? 'not connected', l ? `${l.freq} MHz` : '', l ? 'ok' : 'fail', 'globe'),
+    node('Uplink card', card(uplink),
+      l ? `${l.signal} dBm<br>rx ${esc(l.rxBitrate)}<br>tx ${esc(l.txBitrate)}` : esc(uplink?.state ?? ''),
+      l ? 'ok' : 'fail', 'plug'),
+    node('Laptop', 'NAT + DHCP', hotspot ? 'NetworkManager shared mode' : 'waiting for hotspot', hotspot ? 'ok' : 'todo', 'laptop'),
+    node('Hotspot card', card(ap), esc(hotspot ? ap.connection : ap?.state ?? ''), hotspot ? 'ok' : 'todo', 'tower-broadcast'),
+    node('Clients', `${clients.length} connected`, clients.map((c) => esc(c.hostname ?? c.mac)).join('<br>') || 'gets an IP from the hotspot', clients.length ? 'ok' : 'idle', 'mobile-screen'),
+  ].join('<div class="arrow">→</div>');
+  renderInfo(hotspot ? ap : null);
+}
+
+const bytes = (n) => (n >= 1e9 ? `${(n / 1e9).toFixed(2)} GB` : n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${(n / 1e3).toFixed(0)} KB`);
+const duration = (s) => (s >= 3600 ? `${Math.floor(s / 3600)}h ${Math.floor(s / 60) % 60}m`
+  : s >= 60 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${s}s`);
+
+function renderInfo(ap) {
+  const i = ap?.info;
+  const r = i?.dhcpRange;
+  const tiles = [
+    ['SSID', i?.ssid ?? 'off'],
+    ['Gateway', i?.address ?? '—'],
+    ['DHCP range', r ? `${r.start} – ${r.end}` : '—'],
+    ['Band', i?.band ?? '—'],
+    ['Hotspot card', ap?.device ?? '—'],
+    ['Clients', ap ? String(ap.clients.length) : '0'],
+  ];
+  $('info').innerHTML = tiles.map(([k, v]) => `<div><div class="k">${k}</div><div class="v mono" title="${esc(v)}">${esc(v)}</div></div>`).join('');
+
+  // Station counters are from the client's side of the link: rx = laptop received = client upload.
+  const rows = (ap?.clients ?? []).map((c) => `<tr>
+    <td><a href="/device?mac=${encodeURIComponent(c.mac)}" style="color:var(--accent);text-decoration:none">
+      <i class="fa-solid fa-${esc(c.icon ?? 'mobile-screen')}" aria-hidden="true"></i> ${esc(c.alias ?? c.hostname ?? 'unknown')}</a></td>
+    <td class="mono">${esc(c.ip ?? '—')}</td><td class="mono">${esc(c.mac)}</td>
+    <td class="num">${c.signal ?? '—'} dBm</td><td class="num">${duration(c.connectedSeconds)}</td>
+    <td class="num">${bytes(c.txBytes)}</td><td class="num">${bytes(c.rxBytes)}</td>
+    <td>${pauseControl(c)}</td></tr>`);
+  // Don't rebuild the rows while a pause menu is open, or it would close under the cursor.
+  if (document.activeElement?.closest?.('#clients')) return;
+  $('clients').innerHTML = rows.join('') ||
+    `<tr><td colspan="8" class="empty">${ap ? 'No devices connected' : 'Hotspot is off'}</td></tr>`;
+}
+
+function renderSteps(steps) {
+  $('steps').innerHTML = steps.map((s) => `
+    <li class="${s.status}">
+      <span class="mark">${marks[s.status]}</span>
+      <div>
+        <span class="step-title">${s.n}. ${esc(s.title)}</span><span class="step-detail">${esc(s.detail)}</span>
+        <div class="why">${esc(s.why)}</div>
+        ${s.cmds.length ? `<div class="cmd mono">${s.cmds.map((c) => '$ ' + esc(c)).join('\n')}</div>` : ''}
+        ${s.error ? `<div class="err">${esc(s.error)}</div>` : ''}
+      </div>
+    </li>`).join('');
+}
+
+function message(text, state = '') {
+  $('message').textContent = text;
+  $('message').className = state;
+}
+
+async function refreshStatus() {
+  try {
+    ui.status = await api('GET', '/api/status');
+    renderDiagram(ui.status);
+    controls();
+  } catch (e) { message(e.message, 'fail'); }
+}
+
+async function refreshFlow() {
+  try {
+    const flow = await api('GET', '/api/flow');
+    renderSteps(flow.steps);
+    if (flow.blocked) message('Dry run: fix the ✗ step(s) before starting.', 'fail');
+  } catch (e) { message(e.message, 'fail'); }
+}
+
+async function busy(fn, say = message) {
+  const buttons = document.querySelectorAll('button');
+  ui.busy = true;
+  document.body.classList.add('busy');
+  buttons.forEach((b) => (b.disabled = true));
+  try { await fn(); } catch (e) { say(e.message, 'fail'); }
+  finally {
+    buttons.forEach((b) => (b.disabled = false));
+    ui.busy = false;
+    document.body.classList.remove('busy');
+    controls();
+    await Promise.all([refreshStatus(), refreshProxy()]);
+  }
+}
+
+$('form').addEventListener('submit', (ev) => {
+  ev.preventDefault();
+  const body = Object.fromEntries(new FormData(ev.target));
+  ui.heroNote = null;
+  $('hero-start-note').textContent = 'Starting… about 20 seconds';
+  busy(async () => {
+    message('Starting…');
+    let res;
+    try {
+      res = await api('POST', '/api/start', body);
+    } catch (e) {
+      ui.heroNote = `Failed: ${e.message}`;
+      throw e;
+    }
+    if (res.steps) renderSteps(res.steps);
+    if (res.ok) {
+      message(`Hotspot "${res.ssid}" is up.${res.password ? ` Password: ${res.password}` : ''}`, 'ok');
+      refreshFirewall();
+    } else {
+      message(res.error ?? 'Stopped at the ✗ step above.', 'fail');
+      ui.heroNote = `Failed: ${res.error ?? 'see the Flow steps below'}`;
+    }
+    // Start saved the settings; the form now shows them, and the password field is the saved one.
+    ui.saved = await api('GET', '/api/settings');
+    if (ui.saved.hasPassword) { ev.target.elements.password.value = ''; $('pw').placeholder = 'saved; type to change'; }
+  });
+});
+
+// Same as the form's Start, so validation and the admin password work the same way.
+// The form scrolls into view if something is missing (e.g. the admin password on a phone).
+$('hero-start').addEventListener('click', () => {
+  if (!$('form').reportValidity()) return $('form').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  if (!$('admin-field').hidden && !$('admin').value) {
+    $('form').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    return $('admin').focus();
+  }
+  $('form').requestSubmit();
+});
+
+$('stop').addEventListener('click', () => busy(async () => {
+  await api('POST', '/api/stop');
+  message('Hotspot stopped.', 'ok');
+  await refreshFlow();
+}));
+
+$('swap').addEventListener('click', () => busy(async () => {
+  message('Swapping cards… approve the password dialog on the laptop. Devices on the hotspot reconnect in about 20 seconds.');
+  const res = await api('POST', '/api/swap', {});
+  if (res.steps) renderSteps(res.steps);
+  if (res.ok) message(`Swapped: internet now comes in on ${res.uplink}, hotspot runs on ${res.ap}.`, 'ok');
+  else message('Swap stopped at the ✗ step above.', 'fail');
+}));
+
+$('refresh').addEventListener('click', () => busy(async () => { message(''); await refreshFlow(); }));
+
+// Country code -> flag emoji.
+const flag = (cc) => (/^[A-Z]{2}$/.test(cc ?? '') ? String.fromCodePoint(...[...cc].map((c) => 0x1f1a5 + c.charCodeAt(0))) : '');
+
+function renderProxy(p) {
+  ui.proxy = p;
+  controls();
+  const tiles = [
+    ['Upstream', p.type === 'wireguard' ? `WireGuard VPN · ${p.configured.replace('wireguard://', '')}` : p.configured ?? 'not set'],
+    ['Routing', p.enabled ? 'on' : 'off'],
+    ['Engine (sing-box)', p.engine ? 'running' : 'stopped'],
+    ...(p.configured ? [['Exit', p.geo ? `${flag(p.geo.country)} ${[p.geo.city, p.geo.country].filter(Boolean).join(', ')} · ${p.geo.ip}` : 'locating…']] : []),
+  ];
+  $('proxy-info').innerHTML = tiles.map(([k, v]) => `<div><div class="k">${k}</div><div class="v mono" title="${esc(v)}">${esc(v)}</div></div>`).join('');
+}
+
+function proxyMessage(text, state = '') {
+  $('proxy-message').textContent = text;
+  $('proxy-message').className = state;
+}
+
+async function refreshProxy() {
+  try { renderProxy(await api('GET', '/api/proxy')); } catch (e) { proxyMessage(e.message, 'fail'); }
+}
+
+// Live state behind the controls: /api/status (is the hotspot up, on which card, with
+// which settings), /api/proxy (saved upstream, routing flag, engine) and the settings
+// saved in SQLite. controls() derives every button and state line from it, so the page
+// shows what can actually be done right now.
+const ui = { status: null, proxy: null, saved: null, busy: false, heroNote: null };
+const bandName = (b) => (b === 'a' ? '5 GHz' : '2.4 GHz');
+const setHtml = (el, html) => { if (el.innerHTML !== html) el.innerHTML = html; };
+const stateLine = (text, note = '') =>
+  `<span class="dot" aria-hidden="true"></span><span>${text}</span>${note ? `<span class="note">${note}</span>` : ''}`;
+
+function controls() {
+  if (ui.busy) return;
+  const st = ui.status;
+  const ap = st?.cards.find((c) => c.role === 'hotspot');
+  const uplink = st?.cards.find((c) => c !== ap && c.role === 'client');
+  const on = Boolean(st?.hotspot && ap);
+  const f = $('form').elements;
+
+  // Hotspot: Start when off; Stop when on, plus "Apply changes" once the form differs from what runs.
+  const changes = on ? [
+    f.ssid.value !== ap.info?.ssid && 'SSID',
+    bandName(f.band.value) !== ap.info?.band && 'band',
+    ap.info?.address && `${f.gateway.value}/24` !== ap.info.address && 'gateway',
+    f.password.value && 'password',
+  ].filter(Boolean) : [];
+  $('start').hidden = on && !changes.length;
+  setHtml($('start'), on
+    ? '<i class="fa-solid fa-rotate-right" aria-hidden="true"></i>Apply changes'
+    : '<i class="fa-solid fa-play" aria-hidden="true"></i>Start');
+  $('stop').hidden = !on;
+  // The big hero button: only when we know the hotspot is off (not while still checking).
+  $('hero-start').hidden = !st || on;
+  $('hero-start-note').textContent = ui.heroNote ?? (ui.saved?.ssid
+    ? `${ui.saved.ssid} · ${bandName(ui.saved.band)}${ui.saved.hasPassword ? ' · saved password' : ''}`
+    : 'with the settings in the Hotspot form below');
+  $('swap').hidden = !(on && uplink);
+  const hs = $('hotspot-state');
+  if (!st) {
+    hs.className = 'state'; setHtml(hs, stateLine('Checking…'));
+  } else if (on) {
+    hs.className = `state ${changes.length ? 'todo' : 'ok'}`;
+    setHtml(hs, stateLine(`Running: <b>${esc(ap.info?.ssid ?? '')}</b> · ${esc(ap.info?.band ?? '')} · ${esc(ap.info?.address ?? '')} on ${esc(ap.device)}`,
+      changes.length ? `Changed: ${changes.join(', ')}. Apply restarts the hotspot; phones reconnect.`
+        : `${ap.clients.length} device${ap.clients.length === 1 ? '' : 's'} connected`));
+  } else {
+    hs.className = 'state';
+    setHtml(hs, stateLine('Off', ui.saved?.ssid
+      ? `Start uses the saved settings: ${esc(ui.saved.ssid)}, ${bandName(ui.saved.band)}${ui.saved.hasPassword ? ', saved password' : ''}`
+      : 'Fill in the form and press Start.'));
+  }
+
+  // Proxy: Enable / Disable by the saved routing flag; Restart when it is on but the engine died.
+  const p = ui.proxy;
+  $('proxy-save').disabled = !$('proxy-url').value.trim();
+  $('proxy-save').title = $('proxy-save').disabled ? 'Type an upstream proxy address first' : '';
+  if (!p) return;
+  const broken = p.enabled && !p.engine;
+  // On and running, but the kernel's redirect rules don't point at the hotspot card (renamed
+  // card, reboot): phones silently go direct. Enable re-applies them for the current card.
+  const notRouting = p.enabled && !broken && p.routing === false;
+  $('proxy-on').hidden = p.enabled && !broken && !notRouting;
+  $('proxy-off').hidden = !p.enabled;
+  setHtml($('proxy-on'), broken
+    ? '<i class="fa-solid fa-rotate-right" aria-hidden="true"></i>Restart'
+    : notRouting ? '<i class="fa-solid fa-wrench" aria-hidden="true"></i>Fix routing'
+    : '<i class="fa-solid fa-power-off" aria-hidden="true"></i>Enable');
+  $('proxy-on').disabled = !p.configured || !on;
+  $('proxy-on').title = !p.configured ? 'Save an upstream proxy first' : !on ? 'Start the hotspot first' : '';
+  $('proxy-off').disabled = !on;
+  $('proxy-off').title = on ? '' : 'Start the hotspot first';
+  $('proxy-test').disabled = !p.configured;
+  $('proxy-test').title = p.configured ? '' : 'Save an upstream proxy first';
+  $('proxy-url').placeholder = p.configured
+    ? `saved: ${p.configured}. Paste a new proxy URL or WireGuard config to replace it`
+    : 'socks5://user:pass@host:1080  ·  http://host:8080  ·  https://host:443  ·  or paste a WireGuard [Interface] … [Peer] config';
+  const ps = $('proxy-state');
+  ps.className = `state ${broken || notRouting ? 'fail' : p.enabled ? 'ok' : ''}`;
+  setHtml(ps, !p.configured ? stateLine('Not set up', 'Save an upstream proxy to route clients through it.')
+    : broken ? stateLine('On, but sing-box is not running', 'Clients have no internet until it is restarted.')
+    : notRouting ? stateLine('On, but phones are NOT going through it', `${esc(p.routingIssue ?? '')}. Click Fix routing (password dialog on the laptop).`)
+    : p.enabled ? stateLine(`On: clients go through ${p.type === 'wireguard' ? 'the WireGuard VPN' : esc(p.type ?? 'the proxy')}`)
+    : stateLine('Off: clients go direct', on ? '' : 'Start the hotspot to turn it on.'));
+}
+$('form').addEventListener('input', controls);
+$('proxy-url').addEventListener('input', () => {
+  // Grow for a pasted multi-line config, back to one line for a URL.
+  const el = $('proxy-url');
+  el.rows = Math.min(12, Math.max(1, el.value.split('\n').length));
+  controls();
+});
+// A provider's .conf, read in the browser and put in the box; Save sends it.
+$('proxy-file').addEventListener('change', async (ev) => {
+  const f = ev.target.files?.[0];
+  if (!f) return;
+  $('proxy-url').value = (await f.text()).trim();
+  $('proxy-url').dispatchEvent(new Event('input'));
+  ev.target.value = '';
+  proxyMessage(`Loaded ${f.name}. Click Save.`);
+});
+
+$('proxy-form').addEventListener('submit', (ev) => {
+  ev.preventDefault();
+  busy(async () => {
+    const p = await api('POST', '/api/proxy', { url: $('proxy-url').value });
+    renderProxy(p);
+    $('proxy-url').value = '';
+    $('proxy-url').rows = 1;
+    proxyMessage(`Saved${p.type === 'wireguard' ? ' WireGuard VPN' : ''}.${p.enabled ? ' Phones switch over now.' : ''} Click Test to check it.`, 'ok');
+  }, proxyMessage);
+});
+
+$('proxy-test').addEventListener('click', () => busy(async () => {
+  proxyMessage('Testing…');
+  const r = await api('POST', '/api/proxy/test', {});
+  proxyMessage(r.ok ? `Works: exit IP ${r.ip} (${r.ms} ms)` : `Failed: ${r.error}`, r.ok ? 'ok' : 'fail');
+}, proxyMessage));
+
+for (const [id, path, done] of [['proxy-on', '/api/proxy/on', 'Proxy on: hotspot clients now go through it.'],
+                                 ['proxy-off', '/api/proxy/off', 'Proxy off: hotspot clients go direct.']]) {
+  $(id).addEventListener('click', () => busy(async () => {
+    proxyMessage('Waiting for the password dialog on the laptop…');
+    renderProxy(await api('POST', path, {}));
+    proxyMessage(done, 'ok');
+  }, proxyMessage));
+}
+
+refreshProxy();
+setInterval(refreshProxy, 5000);
+
+// ---- pause internet per device ----------------------------------------------
+function pauseControl(c) {
+  if (c.pausedUntil) {
+    const min = Math.max(1, Math.ceil((c.pausedUntil - Date.now()) / 60000));
+    return `<span class="paused-tag"><i class="fa-solid fa-pause" aria-hidden="true"></i> Paused · ${min} min left
+      <button type="button" data-resume="${esc(c.mac)}"><i class="fa-solid fa-play" aria-hidden="true"></i>Resume</button></span>`;
+  }
+  return `<select class="pause-sel" data-pause="${esc(c.mac)}" aria-label="Pause internet for ${esc(c.alias ?? c.hostname ?? c.mac)}">
+    <option value="">On</option><option value="15">Pause 15 min</option><option value="30">Pause 30 min</option>
+    <option value="60">Pause 1 hour</option><option value="120">Pause 2 hours</option><option value="1440">Pause 24 hours</option></select>`;
+}
+
+async function pauseDevice(mac, minutes) {
+  message(minutes ? 'Pausing… approve the password dialog on the laptop.' : 'Resuming… approve the password dialog on the laptop.');
+  await api('POST', '/api/devices/pause', { mac, minutes });
+  message(minutes ? `Paused for ${minutes >= 60 ? `${minutes / 60} h` : `${minutes} min`}.` : 'Internet is back on.', 'ok');
+  $('clients').querySelector('select:focus')?.blur();
+  await refreshStatus();
+}
+
+$('clients').addEventListener('change', (ev) => {
+  const sel = ev.target.closest('select[data-pause]');
+  if (sel?.value) busy(() => pauseDevice(sel.dataset.pause, Number(sel.value)));
+});
+$('clients').addEventListener('click', (ev) => {
+  const b = ev.target.closest('button[data-resume]');
+  if (b) busy(() => pauseDevice(b.dataset.resume, 0));
+});
+
+// ---- today + leaderboard ------------------------------------------------------
+let stats = null;
+let lbRange = 'today';
+const medals = ['🥇', '🥈', '🥉'];
+
+function renderLeaders() {
+  const rows = stats?.leaders[lbRange] ?? [];
+  const top = Math.max(1, ...rows.map((r) => r.down));
+  $('leaders').innerHTML = rows.map((r, i) => `<tr>
+    <td class="medal">${medals[i] ?? i + 1}</td>
+    <td class="lb-name"><a href="/device?mac=${encodeURIComponent(r.mac)}" style="color:var(--text);text-decoration:none">
+      <i class="fa-solid fa-${esc(r.icon ?? 'mobile-screen')}" aria-hidden="true"></i>${esc(r.alias ?? r.hostname ?? r.mac)}</a>
+      ${i === 0 && rows.length > 1 ? '<span class="why"> · download champion</span>' : ''}</td>
+    <td>${bytes(r.down)}<div class="bar" style="width:${(100 * r.down) / top}%"></div></td>
+    <td class="num">${bytes(r.up)}</td>
+    <td class="num">${r.peak ? `${(r.peak / 1e6).toFixed(1)} Mbit/s` : '—'}</td></tr>`).join('')
+    || '<tr><td colspan="5" class="empty">No traffic yet</td></tr>';
+}
+
+async function refreshStats() {
+  try {
+    stats = await api('GET', '/api/stats');
+    const t = stats.today;
+    const tiles = [
+      ['Downloaded', bytes(t.down)],
+      ['Uploaded', bytes(t.up)],
+      ['Peak speed', `${(t.peak / 1e6).toFixed(1)} Mbit/s`],
+      ['Devices', String(t.devices)],
+      ['Longest online', t.longest ? `${t.longest.name} · ${duration(t.longest.seconds)}` : '—'],
+      ['Proxy rejections', String(t.rejected)],
+    ];
+    $('today').innerHTML = tiles.map(([k, v]) => `<div><div class="k">${k}</div><div class="v" title="${esc(v)}">${esc(v)}</div></div>`).join('');
+    renderLeaders();
+  } catch { /* keep the last view */ }
+}
+
+$('lb-ranges').addEventListener('click', (ev) => {
+  const b = ev.target.closest('button[data-range]');
+  if (!b) return;
+  lbRange = b.dataset.range;
+  $('lb-ranges').querySelectorAll('button').forEach((x) => x.setAttribute('aria-pressed', x === b));
+  renderLeaders();
+});
+refreshStats();
+setInterval(refreshStats, 15000);
+
+// ---- join QR ------------------------------------------------------------------
+let qr = null;
+async function refreshQr() {
+  try {
+    qr = await api('GET', '/api/hotspot/qr');
+    $('qr').innerHTML = qr.ok ? qr.svg : '<p class="why" style="color:#333">Hotspot is off</p>';
+    $('qr-ssid').textContent = qr.ok ? qr.ssid : '';
+  } catch { /* keep the last view */ }
+}
+$('qr-reveal').addEventListener('click', () => {
+  const shown = $('qr-reveal').textContent === 'hide';
+  $('qr-pass').textContent = shown || !qr?.ok ? '••••••••' : qr.password;
+  $('qr-reveal').textContent = shown ? 'show' : 'hide';
+});
+$('qr-full').addEventListener('click', () => {
+  if (!qr?.ok) return;
+  $('qr-big').innerHTML = qr.svg;
+  $('qr-big-ssid').textContent = qr.ssid;
+  $('qr-overlay').hidden = false;
+});
+$('qr-overlay').addEventListener('click', () => { $('qr-overlay').hidden = true; });
+document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') $('qr-overlay').hidden = true; });
+refreshQr();
+setInterval(refreshQr, 60000);
+
+let errRange = 1440;
+const ago = (t) => {
+  const s = Math.round((Date.now() - t) / 1000);
+  return s < 60 ? `${s}s ago` : s < 3600 ? `${Math.floor(s / 60)}m ago` : s < 86400 ? `${Math.floor(s / 3600)}h ago` : `${Math.floor(s / 86400)}d ago`;
+};
+
+async function refreshErrors() {
+  try {
+    const r = await api('GET', `/api/proxy/errors?range=${errRange}`);
+    const tiles = [['Rejected', String(r.total)], ['Sites', String(r.sites)], ['Devices affected', String(r.devices)]];
+    $('err-info').innerHTML = tiles.map(([k, v]) => `<div><div class="k">${k}</div><div class="v mono">${esc(v)}</div></div>`).join('');
+    $('err-sites').innerHTML = r.bySite.map((e) => `<tr>
+      <td class="mono wrap">${esc(e.host)}</td><td class="num">${e.port}</td><td>${esc(e.reason)}</td>
+      <td class="num">${e.count}</td><td>${esc(e.devices ?? 'unknown')}</td><td class="num">${ago(e.last)}</td></tr>`).join('')
+      || '<tr><td colspan="6" class="empty">Nothing rejected in this range</td></tr>';
+    $('err-recent').innerHTML = r.recent.map((e) => `<tr>
+      <td>${new Date(e.t).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })}</td>
+      <td>${esc(e.hostname ?? e.ip ?? 'unknown')}</td><td class="mono wrap">${esc(e.host)}:${e.port}</td>
+      <td>${esc(e.reason)}</td><td class="mono wrap">${esc(e.detail ?? '')}</td></tr>`).join('')
+      || '<tr><td colspan="5" class="empty">Nothing yet</td></tr>';
+  } catch { /* keep the last view */ }
+}
+
+$('err-ranges').addEventListener('click', (ev) => {
+  const b = ev.target.closest('button[data-min]');
+  if (!b) return;
+  errRange = Number(b.dataset.min);
+  $('err-ranges').querySelectorAll('button').forEach((x) => x.setAttribute('aria-pressed', x === b));
+  refreshErrors();
+});
+refreshErrors();
+setInterval(refreshErrors, 10000);
+
+// Firewall check: a modal until the hotspot card has its ufw rules. "Later" hides it
+// until the missing set changes (e.g. the card is renamed again) or the page reloads.
+let fwDismissed = null;
+async function refreshFirewall() {
+  let fw;
+  try { fw = await api('GET', '/api/firewall'); } catch { return; }
+  const key = `${fw.ap}|${fw.missing.join()}`;
+  if (!fw.needed) {
+    if ($('fw-modal').open && !$('fw-fix').disabled) $('fw-modal').close();
+    return;
+  }
+  if (fwDismissed === key || $('fw-modal').open) return;
+  $('fw-card').textContent = fw.ap;
+  $('fw-missing').innerHTML = fw.missing.map((m) => `<li>${esc(m)}</li>`).join('');
+  $('fw-message').textContent = 'Fixing needs root: a password dialog appears on the laptop.';
+  $('fw-message').className = '';
+  $('fw-modal').dataset.key = key;
+  $('fw-modal').showModal();
+}
+$('fw-later').addEventListener('click', () => { fwDismissed = $('fw-modal').dataset.key; $('fw-modal').close(); });
+$('fw-modal').addEventListener('cancel', () => { fwDismissed = $('fw-modal').dataset.key; });
+$('fw-fix').addEventListener('click', async () => {
+  if ($('fw-admin').value) $('admin').value = $('fw-admin').value;
+  $('fw-fix').disabled = $('fw-later').disabled = true;
+  $('fw-message').textContent = 'Waiting for the password dialog on the laptop…';
+  $('fw-message').className = '';
+  try {
+    const fw = await api('POST', '/api/firewall/fix', {});
+    if (fw.needed) throw new Error(`Still missing: ${fw.missing.join(', ')}`);
+    $('fw-message').textContent = 'Fixed. Forget the network on the phone and join again.';
+    $('fw-message').className = 'ok';
+    setTimeout(() => $('fw-modal').close(), 2500);
+  } catch (e) {
+    $('fw-message').textContent = e.message;
+    $('fw-message').className = 'fail';
+  } finally {
+    $('fw-fix').disabled = $('fw-later').disabled = false;
+  }
+});
+refreshFirewall();
+setInterval(refreshFirewall, 10000);
+
+// Prefill the form with the settings saved on the last Start (kept in SQLite).
+api('GET', '/api/settings').then((s) => {
+  ui.saved = s;
+  const f = $('form').elements;
+  if (s.ssid) f.ssid.value = s.ssid;
+  if (s.gateway) f.gateway.value = s.gateway;
+  if (s.band) f.band.value = s.band;
+  if (s.hasPassword) $('pw').placeholder = 'saved; type to change';
+  controls();
+}).catch(() => {});
+
+api('GET', '/api/whoami').then(({ local }) => { $('admin-field').hidden = local; $('fw-admin-field').hidden = local; });
+refreshStatus();
+refreshFlow();
+setInterval(refreshStatus, 5000);
+</script>
+<script type="module" src="/assets/map.js"></script>
+</body>
+</html>

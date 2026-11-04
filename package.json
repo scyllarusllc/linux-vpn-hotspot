@@ -1,0 +1,45 @@
+{
+  "name": "linux-vpn-hotspot",
+  "version": "0.1.0",
+  "description": "Linux VPN hotspot: share a WireGuard VPN or SOCKS5/HTTP proxy from a laptop with two Wi-Fi cards to phones and TVs, without a VPN app. Doubles as a WiFi extender/repeater, with a live network dashboard",
+  "keywords": [
+    "vpn-hotspot",
+    "linux-vpn-hotspot",
+    "wireguard",
+    "wireguard-hotspot",
+    "proxy-hotspot",
+    "transparent-proxy",
+    "socks5",
+    "sing-box",
+    "wifi-hotspot",
+    "linux-hotspot",
+    "wifi-extender",
+    "wifi-repeater",
+    "networkmanager",
+    "nmcli",
+    "access-point",
+    "network-monitor",
+    "linux",
+    "arch-linux",
+    "omarchy"
+  ],
+  "type": "module",
+  "bin": {
+    "vpn-hotspot": "./bin/vpn-hotspot.js",
+    "wifi-extender": "./bin/vpn-hotspot.js"
+  },
+  "scripts": {
+    "dev": "node --watch-path=src --watch-path=public src/server.js",
+    "flow": "node bin/vpn-hotspot.js flow",
+    "status": "node bin/vpn-hotspot.js status",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@fortawesome/fontawesome-free": "^7.3.1",
+    "qrcode": "^1.5.4"
+  }
+}
