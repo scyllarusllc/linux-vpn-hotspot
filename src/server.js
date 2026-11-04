@@ -12,7 +12,8 @@ import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runFlow } from './flow.js';
 import QRCode from 'qrcode';
-import { swapCards, ufwScript } from './swap.js';
+import { swapCards, switchRoles, ufwScript } from './swap.js';
+import { fixUsbWifi } from './usbmode.js';
 import { firewallCheck } from './firewall.js';
 import { loadState } from './state.js';
 import { MAX_PAUSE_MIN, activePauses, setPause } from './pause.js';
@@ -325,6 +326,20 @@ const routes = {
     await withRoot(async () => { res = await swapCards({ webPort: PORT, onStep: (e) => steps.push(e) }); });
     logEvent('swap', res.ok ? `Swapped cards: hotspot now on ${res.ap}, uplink on ${res.uplink}` : 'Card swap failed', req);
     return { ...res, steps };
+  },
+  // Hotspot off: swap the uplink and hotspot roles of the two cards (applied by the next Start).
+  'POST /api/cards/switch': async (_body, _who, _url, req) => {
+    const res = await switchRoles();
+    logEvent('swap', `Cards switched for the next start: hotspot on ${res.ap}, uplink on ${res.uplink}`, req);
+    return res;
+  },
+  // A USB Wi-Fi adapter stuck in "CDROM mode" is switched to Wi-Fi mode.
+  // Needs root: a password dialog appears on the laptop.
+  'POST /api/usb-wifi/fix': async (_body, _who, _url, req) => {
+    let res;
+    await withRoot(async () => { res = await fixUsbWifi(); });
+    logEvent('server', res.candidates.length ? `USB Wi-Fi adapter switched: ${res.candidates.map((c) => `${c.vendor}:${c.product}`).join(', ')}` : 'USB Wi-Fi adapter already switched', req);
+    return res;
   },
   // Everything the map shows beyond /api/devices and /api/status, keyed by MAC.
   'GET /api/map': async () => {

@@ -14,9 +14,17 @@ import {
   sh,
   stations,
   supportsAp,
+  tryCmd,
   wifiDevices,
 } from './system.js';
 import { loadState } from './state.js';
+
+// A saved choice (from "swap" / "switch cards") wins over the default of using the USB card for the uplink.
+export async function pickUplink(devices, requested, defaultRoute) {
+  const names = devices.map((d) => d.device);
+  const saved = (await loadState()).uplink;
+  return requested ?? (names.includes(saved) ? saved : null) ?? devices.find((d) => d.usb)?.device ?? defaultRoute ?? names[0];
+}
 
 const steps = [
   {
@@ -36,11 +44,7 @@ const steps = [
     async check(ctx) {
       const { opts, devices } = ctx;
       const names = devices.map((d) => d.device);
-      // A saved choice (from "swap") wins over the default of using the USB card for the uplink.
-      const saved = (await loadState()).uplink;
-      ctx.uplink =
-        opts.uplink ?? (names.includes(saved) ? saved : null) ??
-        devices.find((d) => d.usb)?.device ?? (await defaultRouteDev()) ?? names[0];
+      ctx.uplink = await pickUplink(devices, opts.uplink, await defaultRouteDev());
       ctx.ap = opts.ap ?? names.find((n) => n !== ctx.uplink);
       for (const dev of [ctx.uplink, ctx.ap]) {
         if (!names.includes(dev)) return { ok: false, fatal: true, detail: `${dev} is not a WiFi device` };
@@ -74,10 +78,14 @@ const steps = [
         ctx.opts.uplinkCon ??
         ctx.devices.find((d) => d.connection && d.connection !== HOTSPOT_CON)?.connection;
       if (!con) return { ok: false, fatal: true, detail: 'no router connection found; pass --uplink-con' };
+      // A profile pinned to another card (connection.interface-name) refuses `con up ifname <uplink>`
+      // with "interface names of the device and the connection didn't match": unpin it first.
+      const pinned = ((await tryCmd('nmcli', ['-g', 'connection.interface-name', 'con', 'show', con])) ?? '').trim();
+      const unpin = pinned && pinned !== ctx.uplink ? [['nmcli', ['con', 'modify', con, 'connection.interface-name', '']]] : [];
       return {
         ok: false,
         detail: `move "${con}" to ${ctx.uplink}`,
-        cmds: [['nmcli', ['con', 'up', con, 'ifname', ctx.uplink]]],
+        cmds: [...unpin, ['nmcli', ['con', 'up', con, 'ifname', ctx.uplink]]],
       };
     },
   },

@@ -42,7 +42,7 @@ export async function asRoot(script) {
 }
 
 export const fmt = (cmd, args) =>
-  [cmd, ...args.map((a) => (/[\s"']/.test(a) ? JSON.stringify(a) : a))].join(' ');
+  [cmd, ...args.map((a) => (a === '' || /[\s"']/.test(a) ? JSON.stringify(a) : a))].join(' ');
 
 export async function wifiDevices() {
   return parseDevices(await sh('nmcli', ['-t', '-f', 'DEVICE,TYPE,STATE,CONNECTION', 'dev']));

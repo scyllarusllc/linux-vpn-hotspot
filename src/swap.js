@@ -2,10 +2,10 @@
 // hotspot's SSID, password, band and gateway so clients reconnect on their own.
 // Firewall rules are per interface, so the new hotspot card gets them first.
 
-import { runFlow } from './flow.js';
+import { pickUplink, runFlow } from './flow.js';
 import { DNS_PORT, REDIRECT_PORT, applyCurrentRules } from './proxy.js';
 import { updateState } from './state.js';
-import { HOTSPOT_CON, getStatus, hotspotSettings, sh, supportsAp } from './system.js';
+import { HOTSPOT_CON, defaultRouteDev, getStatus, hotspotActive, hotspotSettings, isUsb, sh, supportsAp, wifiDevices } from './system.js';
 
 // The ufw rules the hotspot needs on a given card (idempotent; ufw skips existing ones).
 export function ufwScript(ap, uplink, webPort) {
@@ -47,4 +47,18 @@ export async function swapCards({ webPort, onStep = () => {} }) {
     { apply: true, onStep },
   );
   return { ...res, ...next };
+}
+
+// Hotspot is off: swap which card is the uplink and which will be the hotspot. Only saved;
+// the next Start applies it (and moves the router connection to the new uplink).
+export async function switchRoles() {
+  if (await hotspotActive()) throw Object.assign(new Error('The hotspot is running: use "Swap cards" in the Network section.'), { status: 409 });
+  const devices = await wifiDevices();
+  if (devices.length < 2) throw Object.assign(new Error('Only one Wi-Fi card found, nothing to switch.'), { status: 409 });
+  for (const d of devices) d.usb = await isUsb(d.device);
+  const uplink = await pickUplink(devices, undefined, await defaultRouteDev());
+  const ap = devices.find((d) => d.device !== uplink)?.device;
+  if (!(await supportsAp(uplink))) throw Object.assign(new Error(`${uplink} does not support AP mode, so it cannot be the hotspot.`), { status: 409 });
+  await updateState({ uplink: ap });
+  return { uplink: ap, ap: uplink };
 }

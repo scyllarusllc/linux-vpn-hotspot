@@ -75,7 +75,7 @@
   th { color: var(--dim); font-weight: 500; font-size: 12px; border-top: 0; }
   td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
   .empty { color: var(--dim); text-align: center; }
-  #message { margin-top: 12px; min-height: 20px; }
+  #message { margin-top: 12px; min-height: 20px; white-space: pre-line; }
   #message.ok, #proxy-message.ok { color: var(--ok); } #message.fail, #proxy-message.fail { color: var(--fail); }
   #proxy-message { margin-top: 8px; min-height: 20px; }
   /* Big Start call-to-action, only while the hotspot is off. Instagram-style gradient that drifts. */
@@ -95,6 +95,10 @@
   @keyframes hero-glow { 0%, 100% { box-shadow: 0 6px 24px -6px rgba(214, 41, 118, .55); }
                          50% { box-shadow: 0 10px 40px -4px rgba(150, 47, 191, .8); } }
   @media (prefers-reduced-motion: reduce) { .hero-start { animation: none; background-size: 100% 100%; } }
+  .hero-fix { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; margin-top: 10px;
+              padding: 12px 16px; font-size: 15px; border-color: var(--accent); color: var(--accent); }
+  #usb-fix-msg { margin-top: 8px; white-space: pre-line; }
+  #usb-fix-msg.ok { color: var(--ok); } #usb-fix-msg.fail { color: var(--fail); }
   .hero-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
   .hero-actions { display: flex; gap: 8px; }
   .btn { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 6px;
@@ -159,6 +163,13 @@
       <i class="fa-solid fa-power-off" aria-hidden="true"></i>
       <span>Start hotspot<small id="hero-start-note"></small></span>
     </button>
+    <button type="button" class="hero-fix" id="usb-fix" hidden title="Switches a USB Wi-Fi adapter out of CDROM mode (installs usb_modeswitch)">
+      <i class="fa-brands fa-usb" aria-hidden="true"></i>Only one Wi-Fi card found? Fix USB Wi-Fi adapter
+    </button>
+    <button type="button" class="hero-fix" id="switch-cards" hidden title="Swap which Wi-Fi card joins the router and which one broadcasts the hotspot">
+      <i class="fa-solid fa-right-left" aria-hidden="true"></i>Switch Wi-Fi cards
+    </button>
+    <div id="usb-fix-msg" role="status"></div>
     <div class="nm-summary" id="nm-summary" style="margin-top:20px"></div>
     <div class="nm-map" id="nm-map" style="height:540px;margin-top:12px">
       <svg id="nm-lines" aria-hidden="true"></svg>
@@ -471,6 +482,30 @@ $('swap').addEventListener('click', () => busy(async () => {
   else message('Swap stopped at the ✗ step above.', 'fail');
 }));
 
+// Second card missing: a USB adapter that shows up as a "Driver CDROM" needs usb_modeswitch.
+$('usb-fix').addEventListener('click', () => {
+  const say = (text, state = '') => { $('usb-fix-msg').textContent = text; $('usb-fix-msg').className = state; };
+  say('Switching the USB adapter… approve the password dialog on the laptop (may take up to a minute).');
+  return busy(async () => {
+    const res = await api('POST', '/api/usb-wifi/fix', {});
+    ui.heroNote = null;
+    say(`${res.candidates.length ? `Switched ${res.candidates.map((c) => c.vendor + ':' + c.product).join(', ')}.` : 'The adapter is already switched.'} ${res.wifi} Wi-Fi cards now:\n${res.devices}\nPress Start again.`, 'ok');
+    await refreshFlow();
+  }, say);
+});
+
+// Hotspot off: swap the roles (e.g. when the built-in card can't start 5 GHz). Start applies it.
+$('switch-cards').addEventListener('click', () => {
+  const say = (text, state = '') => { $('usb-fix-msg').textContent = text; $('usb-fix-msg').className = state; };
+  say('');
+  return busy(async () => {
+    const res = await api('POST', '/api/cards/switch', {});
+    ui.heroNote = null;
+    say(`Switched: hotspot will run on ${res.ap}, internet comes in on ${res.uplink}. Press Start.`, 'ok');
+    await refreshFlow();
+  }, say);
+});
+
 $('refresh').addEventListener('click', () => busy(async () => { message(''); await refreshFlow(); }));
 
 // Country code -> flag emoji.
@@ -529,6 +564,9 @@ function controls() {
   $('stop').hidden = !on;
   // The big hero button: only when we know the hotspot is off (not while still checking).
   $('hero-start').hidden = !st || on;
+  // Shown only after Start failed, where the usual cause is a missing second card.
+  $('switch-cards').hidden = $('hero-start').hidden;
+  $('usb-fix').hidden = $('hero-start').hidden || !ui.heroNote?.startsWith('Failed');
   $('hero-start-note').textContent = ui.heroNote ?? (ui.saved?.ssid
     ? `${ui.saved.ssid} · ${bandName(ui.saved.band)}${ui.saved.hasPassword ? ' · saved password' : ''}`
     : 'with the settings in the Hotspot form below');
