@@ -142,8 +142,9 @@ function render(hist, status, proxy, x = {}) {
     nodes.push({
       cls: `nm-router nm-proxy${up ? '' : ' nm-offline'}`, x: px, y: ry, size: 34, icon: 'shield-halved',
       flag: g ? flagOf(g.country) : '',
-      name: g ? [g.city, g.country].filter(Boolean).join(', ') : kind,
-      meta: !proxy.engine ? 'sing-box stopped' : !up ? 'not routing: fix in Proxy' : g ? `${countryOf(g.country) ?? ''} · exit ${g.ip}` : 'locating exit…',
+      // City and state on the label, country and the exit IP under it.
+      name: g ? ([g.city, g.region].filter(Boolean).join(', ') || countryOf(g.country) || kind) : kind,
+      meta: !proxy.engine ? 'sing-box stopped' : !up ? 'not routing: fix in Proxy' : g ? [g.city || g.region ? countryOf(g.country) : null, g.ip].filter(Boolean).join(' · ') : 'locating exit…',
       tip: `<div class="nm-t">${g ? `${flagOf(g.country)} ` : ''}${kind} exit</div>
         ${g ? `<div>${esc([g.city, g.region, countryOf(g.country)].filter(Boolean).join(', '))}</div><div>Exit IP ${esc(g.ip)}</div>` : ''}
         <div>${esc(proxy.configured ?? '')}</div>

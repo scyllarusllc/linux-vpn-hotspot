@@ -51,8 +51,6 @@
 
   form { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
   label { display: flex; flex-direction: column; gap: 4px; color: var(--dim); font-size: 12px; }
-  /* The upstream box: one line for a proxy URL, grows when a WireGuard config is pasted. */
-  #proxy-url { width: 100%; min-height: 36px; resize: vertical; font: 12.5px/1.5 ui-monospace, monospace; }
   .file-btn { position: relative; overflow: hidden; }
   .file-btn input { position: absolute; inset: 0; opacity: 0; cursor: pointer; min-width: 0; }
   input, select { background: var(--panel); color: var(--text); border: 1px solid var(--line);
@@ -189,6 +187,23 @@
   </div>
   </header>
 
+  <h2 id="proxy"><i class="fa-solid fa-globe" aria-hidden="true"></i>VPN / proxy
+    <a href="/proxies" style="float:right;text-transform:none;letter-spacing:0;color:var(--accent);text-decoration:none"><i class="fa-solid fa-sliders" aria-hidden="true"></i> Manage proxies</a></h2>
+  <p class="state" id="proxy-state"></p>
+  <div class="info" id="proxy-info"></div>
+  <form id="proxy-form">
+    <label style="min-width:260px">Proxy in use
+      <select id="proxy-select" aria-label="Switch proxy"></select>
+    </label>
+    <button type="button" id="proxy-test"><i class="fa-solid fa-flask" aria-hidden="true"></i>Test</button>
+    <button type="button" class="primary" id="proxy-on"><i class="fa-solid fa-power-off" aria-hidden="true"></i>Enable</button>
+    <button type="button" id="proxy-off"><i class="fa-solid fa-ban" aria-hidden="true"></i>Disable</button>
+  </form>
+  <p class="why" style="margin-top:8px">Hotspot clients go through this VPN or proxy automatically: nothing to install on the
+    phone, and the phone sees no VPN. Pick another one above to switch (phones move over right away while it is on), or add, test and
+    edit them on the <a href="/proxies">Proxies page</a>. Keys stay on the laptop. Turning it on or off needs root: a password dialog appears on the laptop.</p>
+  <div id="proxy-message"></div>
+
   <section class="today-grid">
     <div>
       <h2><i class="fa-solid fa-calendar-day" aria-hidden="true"></i>Today</h2>
@@ -268,26 +283,6 @@
     <button type="button" id="refresh"><i class="fa-solid fa-rotate" aria-hidden="true"></i>Re-check flow</button>
   </form>
   <div id="message"></div>
-
-  <h2><i class="fa-solid fa-globe" aria-hidden="true"></i>VPN / proxy</h2>
-  <p class="state" id="proxy-state"></p>
-  <div class="info" id="proxy-info"></div>
-  <form id="proxy-form">
-    <label style="flex:1">Proxy URL or WireGuard config
-      <textarea name="url" id="proxy-url" rows="1" spellcheck="false" autocomplete="off"
-        style="background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:7px 9px"></textarea>
-    </label>
-    <span class="btn file-btn" role="button"><i class="fa-solid fa-file-import" aria-hidden="true"></i>Load .conf
-      <input type="file" id="proxy-file" accept=".conf,text/plain" aria-label="Load a WireGuard .conf file"></span>
-    <button type="submit" id="proxy-save"><i class="fa-solid fa-floppy-disk" aria-hidden="true"></i>Save</button>
-    <button type="button" id="proxy-test"><i class="fa-solid fa-flask" aria-hidden="true"></i>Test</button>
-    <button type="button" class="primary" id="proxy-on"><i class="fa-solid fa-power-off" aria-hidden="true"></i>Enable</button>
-    <button type="button" id="proxy-off"><i class="fa-solid fa-ban" aria-hidden="true"></i>Disable</button>
-  </form>
-  <p class="why" style="margin-top:8px">Hotspot clients go through this VPN or proxy automatically: nothing to install on the
-    phone, and the phone sees no VPN. Paste a <b>SOCKS5 / HTTP / HTTPS proxy URL</b>, or a <b>WireGuard config</b> from your
-    VPN provider (paste it or use Load .conf). Keys stay on the laptop. Turning it on or off needs root: a password dialog appears on the laptop.</p>
-  <div id="proxy-message"></div>
 
   <h2><i class="fa-solid fa-ban" aria-hidden="true"></i>Rejected connections
     <span class="ranges" id="err-ranges" style="float:right;text-transform:none;letter-spacing:0">
@@ -510,16 +505,23 @@ $('refresh').addEventListener('click', () => busy(async () => { message(''); awa
 
 // Country code -> flag emoji.
 const flag = (cc) => (/^[A-Z]{2}$/.test(cc ?? '') ? String.fromCodePoint(...[...cc].map((c) => 0x1f1a5 + c.charCodeAt(0))) : '');
+const regionNames = new Intl.DisplayNames([], { type: 'region' });
+const countryName = (cc) => { try { return regionNames.of(cc); } catch { return cc; } };
 
 function renderProxy(p) {
   ui.proxy = p;
   controls();
   const tiles = [
+    ['In use', p.name ?? 'none'],
     ['Upstream', p.type === 'wireguard' ? `WireGuard VPN · ${p.configured.replace('wireguard://', '')}` : p.configured ?? 'not set'],
     ['Routing', p.enabled ? 'on' : 'off'],
     ['Engine (sing-box)', p.engine ? 'running' : 'stopped'],
-    ...(p.configured ? [['Exit', p.geo ? `${flag(p.geo.country)} ${[p.geo.city, p.geo.country].filter(Boolean).join(', ')} · ${p.geo.ip}` : 'locating…']] : []),
+    ...(p.configured ? [['Exit', p.geo ? `${flag(p.geo.country)} ${[p.geo.city, p.geo.region, countryName(p.geo.country)].filter(Boolean).join(', ')} · ${p.geo.ip}` : 'locating…']] : []),
   ];
+  const opts = p.proxies?.length
+    ? p.proxies.map((x) => `<option value="${esc(x.id)}"${x.active ? ' selected' : ''}>${esc(x.name)} · ${esc(x.type === 'wireguard' ? 'WireGuard' : x.type.toUpperCase())}</option>`).join('')
+    : '<option value="">No proxies saved yet</option>';
+  setHtml($('proxy-select'), opts);
   $('proxy-info').innerHTML = tiles.map(([k, v]) => `<div><div class="k">${k}</div><div class="v mono" title="${esc(v)}">${esc(v)}</div></div>`).join('');
 }
 
@@ -588,8 +590,6 @@ function controls() {
 
   // Proxy: Enable / Disable by the saved routing flag; Restart when it is on but the engine died.
   const p = ui.proxy;
-  $('proxy-save').disabled = !$('proxy-url').value.trim();
-  $('proxy-save').title = $('proxy-save').disabled ? 'Type an upstream proxy address first' : '';
   if (!p) return;
   const broken = p.enabled && !p.engine;
   // On and running, but the kernel's redirect rules don't point at the hotspot card (renamed
@@ -602,49 +602,30 @@ function controls() {
     : notRouting ? '<i class="fa-solid fa-wrench" aria-hidden="true"></i>Fix routing'
     : '<i class="fa-solid fa-power-off" aria-hidden="true"></i>Enable');
   $('proxy-on').disabled = !p.configured || !on;
-  $('proxy-on').title = !p.configured ? 'Save an upstream proxy first' : !on ? 'Start the hotspot first' : '';
+  $('proxy-on').title = !p.configured ? 'Add a proxy on the Proxies page first' : !on ? 'Start the hotspot first' : '';
   $('proxy-off').disabled = !on;
   $('proxy-off').title = on ? '' : 'Start the hotspot first';
   $('proxy-test').disabled = !p.configured;
-  $('proxy-test').title = p.configured ? '' : 'Save an upstream proxy first';
-  $('proxy-url').placeholder = p.configured
-    ? `saved: ${p.configured}. Paste a new proxy URL or WireGuard config to replace it`
-    : 'socks5://user:pass@host:1080  ·  http://host:8080  ·  https://host:443  ·  or paste a WireGuard [Interface] … [Peer] config';
+  $('proxy-test').title = p.configured ? '' : 'Add a proxy on the Proxies page first';
+  $('proxy-select').disabled = !p.proxies?.length;
   const ps = $('proxy-state');
   ps.className = `state ${broken || notRouting ? 'fail' : p.enabled ? 'ok' : ''}`;
-  setHtml(ps, !p.configured ? stateLine('Not set up', 'Save an upstream proxy to route clients through it.')
+  setHtml(ps, !p.configured ? stateLine('Not set up', 'Add a proxy on the Proxies page to route clients through it.')
     : broken ? stateLine('On, but sing-box is not running', 'Clients have no internet until it is restarted.')
     : notRouting ? stateLine('On, but phones are NOT going through it', `${esc(p.routingIssue ?? '')}. Click Fix routing (password dialog on the laptop).`)
     : p.enabled ? stateLine(`On: clients go through ${p.type === 'wireguard' ? 'the WireGuard VPN' : esc(p.type ?? 'the proxy')}`)
     : stateLine('Off: clients go direct', on ? '' : 'Start the hotspot to turn it on.'));
 }
 $('form').addEventListener('input', controls);
-$('proxy-url').addEventListener('input', () => {
-  // Grow for a pasted multi-line config, back to one line for a URL.
-  const el = $('proxy-url');
-  el.rows = Math.min(12, Math.max(1, el.value.split('\n').length));
-  controls();
-});
-// A provider's .conf, read in the browser and put in the box; Save sends it.
-$('proxy-file').addEventListener('change', async (ev) => {
-  const f = ev.target.files?.[0];
-  if (!f) return;
-  $('proxy-url').value = (await f.text()).trim();
-  $('proxy-url').dispatchEvent(new Event('input'));
-  ev.target.value = '';
-  proxyMessage(`Loaded ${f.name}. Click Save.`);
-});
-
-$('proxy-form').addEventListener('submit', (ev) => {
-  ev.preventDefault();
-  busy(async () => {
-    const p = await api('POST', '/api/proxy', { url: $('proxy-url').value });
-    renderProxy(p);
-    $('proxy-url').value = '';
-    $('proxy-url').rows = 1;
-    proxyMessage(`Saved${p.type === 'wireguard' ? ' WireGuard VPN' : ''}.${p.enabled ? ' Phones switch over now.' : ''} Click Test to check it.`, 'ok');
-  }, proxyMessage);
-});
+// Switch the proxy in use. While routing is on, phones move over right away.
+$('proxy-select').addEventListener('change', (ev) => busy(async () => {
+  const id = ev.target.value;
+  if (!id) return;
+  proxyMessage('Switching…');
+  const r = await api('POST', '/api/proxies/select', { id });
+  renderProxy(r);
+  proxyMessage(r.applied ? `Now using ${r.name}. Phones switched over (connections drop for about a second).` : `Now using ${r.name}.`, 'ok');
+}, proxyMessage));
 
 $('proxy-test').addEventListener('click', () => busy(async () => {
   proxyMessage('Testing…');

@@ -14,6 +14,8 @@ import { runFlow } from './flow.js';
 import QRCode from 'qrcode';
 import { swapCards, switchRoles, ufwScript } from './swap.js';
 import { fixUsbWifi } from './usbmode.js';
+import { DEFAULT_BYPASS, getBypass, parseBypass, setBypass } from './bypass.js';
+import { addProxies, getProxy, listProxies, recordTest, removeProxy, selectProxy, updateProxy } from './proxies.js';
 import { firewallCheck } from './firewall.js';
 import { loadState } from './state.js';
 import { MAX_PAUSE_MIN, activePauses, setPause } from './pause.js';
@@ -22,8 +24,8 @@ import { INTERVAL_MS, deviceHistory, historyStore, startSampler } from './histor
 import { startProxyLog } from './proxylog.js';
 import { insights, recordSite, setSites, sitesEnabled, startInsights } from './insights.js';
 import {
-  applyCurrentRules, loadProxy, proxyGeo, proxyOff, proxyOn, proxyStatus as proxyState, restartEngine, rulesStatus, saveProxy,
-  testProxy,
+  applyCurrentRules, loadProxy, proxyGeo, proxyOff, proxyOn, proxyStatus as proxyState, restartEngine, rulesStatus,
+  testAndLocate, testProxy,
 } from './proxy.js';
 import {
   HOTSPOT_CON, getStatus, hotspotActive, hotspotAddress, hotspotNet, hotspotSettings, sh, tryCmd,
@@ -53,6 +55,7 @@ const pages = {
   '/device': new URL('../public/device.html', import.meta.url),
   '/hunt': new URL('../public/hunt.html', import.meta.url),
   '/log': new URL('../public/log.html', import.meta.url),
+  '/proxies': new URL('../public/proxies.html', import.meta.url),
 };
 // Shared header and footer, put into every page at <!--#header--> / <!--#footer-->.
 // The nav link for the current page gets aria-current. Read per request, so edits show on reload.
@@ -211,6 +214,12 @@ async function proxyStatus() {
     st.routing = r.ok;
     st.routingIssue = r.issue;
   }
+  const list = await listProxies();
+  st.proxies = list.proxies;
+  st.activeId = list.activeId;
+  st.name = list.proxies.find((x) => x.active)?.name ?? null;
+  st.bypass = await getBypass();
+  st.bypassDefault = DEFAULT_BYPASS;
   if (!st.configured) return { ...st, geo: null };
   const { g, stale } = cachedGeo(st.configured);
   if (stale) refreshGeo(st.configured);
@@ -387,16 +396,71 @@ const routes = {
     return after;
   },
   'GET /api/proxy': () => proxyStatus(),
-  'POST /api/proxy': async (body, _who, _url, req) => {
-    let p;
-    try {
-      p = await saveProxy(String(body.url ?? ''));
-    } catch (err) {
-      throw Object.assign(err, { status: 400 });
+  // Same list as /api/proxy (it includes `proxies`); the /proxies page reads this one.
+  'GET /api/proxies': () => proxyStatus(),
+  // `url`: one proxy URL, several (one per line) or WireGuard configs. The first proxy ever added becomes active.
+  'POST /api/proxies/add': async (body, _who, _url, req) => {
+    const { added, activated } = await addProxies(String(body.url ?? ''), body.name);
+    logEvent('proxy', `Added ${added.map((a) => a.name).join(', ')}${activated ? ' (now active)' : ''}`, req);
+    return { ...(await proxyStatus()), added: added.length };
+  },
+  'POST /api/proxies/update': async (body, _who, _url, req) => {
+    const { changed } = await updateProxy(String(body.id), { name: body.name, raw: body.url });
+    // The one in use changed: the running engine picks it up now (connections drop for about a second).
+    const applied = changed && (await restartEngine());
+    logEvent('proxy', `Edited proxy ${body.name ?? body.id}${applied ? ' (applied)' : ''}`, req);
+    return proxyStatus();
+  },
+  'POST /api/proxies/delete': async (body, _who, _url, req) => {
+    const id = String(body.id);
+    const { activeId } = await listProxies();
+    if (id === activeId && (await loadState()).proxyEnabled) {
+      throw Object.assign(new Error('This proxy is in use. Switch to another one, or turn routing off, before deleting it.'), { status: 409 });
     }
-    // Already on: switch the running engine over now (connections drop for about a second).
+    const entry = await getProxy(id);
+    await removeProxy(id);
+    logEvent('proxy', `Deleted proxy ${entry.name}`, req);
+    return proxyStatus();
+  },
+  // Switch the proxy in use. While routing is on, phones move over now; if sing-box
+  // rejects the new one, the old one stays.
+  'POST /api/proxies/select': async (body, _who, _url, req) => {
+    const { previous, name } = await selectProxy(String(body.id));
+    let applied = false;
+    try {
+      applied = await restartEngine();
+    } catch (err) {
+      if (previous) await selectProxy(previous);
+      throw Object.assign(new Error(`Could not switch: ${err.stderr?.trim() || err.message}`), { status: 400 });
+    }
+    logEvent('proxy', `Switched to ${name}${applied ? ' (applied)' : ''}`, req);
+    return { ...(await proxyStatus()), applied };
+  },
+  // Domains that skip the proxy (Wi-Fi calling etc). `domains`: one per line. Applied to a running proxy now.
+  'POST /api/proxies/bypass': async (body, _who, _url, req) => {
+    const list = parseBypass(body.domains);
+    await setBypass(list);
+    const applied = await restartEngine();
+    logEvent('proxy', `Bypass list: ${list.length ? list.join(', ') : 'empty'}${applied ? ' (applied)' : ''}`, req);
+    return proxyStatus();
+  },
+  'POST /api/proxies/test': async (body) => {
+    const entry = await getProxy(String(body.id));
+    const r = await testAndLocate(entry.proxy);
+    await recordTest(entry.id, r);
+    return r;
+  },
+  // Kept for the CLI and old scripts: adds the proxy and makes it the one in use.
+  'POST /api/proxy': async (body, _who, _url, req) => {
+    let added;
+    try {
+      ({ added } = await addProxies(String(body.url ?? ''), body.name));
+    } catch (err) {
+      throw Object.assign(err, { status: err.status ?? 400 });
+    }
+    await selectProxy(added[0].id);
     const switched = await restartEngine();
-    logEvent('proxy', `Upstream changed to ${p.type === 'wireguard' ? 'WireGuard VPN' : p.type} ${p.host}:${p.port}${switched ? ' (applied)' : ''}`, req);
+    logEvent('proxy', `Upstream changed to ${added[0].name}${switched ? ' (applied)' : ''}`, req);
     return proxyStatus();
   },
   // ?range=<minutes>, default 24 hours.

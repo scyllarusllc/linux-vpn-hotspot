@@ -128,3 +128,15 @@ test('singBoxConfig tunnels WireGuard with DNS through the tunnel', async () => 
   const socks = singBoxConfig(parseProxyUrl('socks5://h:1080'), { cacheFile: 'c.db' });
   assert.ok(!socks.endpoints && !socks.route.rules.some((r) => r.action === 'resolve'));
 });
+
+test('bypass domains get real DNS answers and leave directly, ahead of the fake-IP rule', () => {
+  const cfg = singBoxConfig(parseProxyUrl('socks5://h:1080'), { cacheFile: 'c.db', bypass: ['3gppnetwork.org'] });
+  assert.deepEqual(cfg.dns.rules[0], { domain_suffix: ['3gppnetwork.org'], query_type: ['A'], action: 'route', server: 'local' });
+  assert.equal(cfg.dns.rules[1].server, 'fake');
+  const sniff = cfg.route.rules.findIndex((r) => r.action === 'sniff');
+  assert.deepEqual(cfg.route.rules[sniff + 1], { domain_suffix: ['3gppnetwork.org'], action: 'route', outbound: 'direct' });
+  // No list, no extra rules.
+  const none = singBoxConfig(parseProxyUrl('socks5://h:1080'), { cacheFile: 'c.db' });
+  assert.equal(none.dns.rules[0].server, 'fake');
+  assert.ok(!none.route.rules.some((r) => r.domain_suffix));
+});

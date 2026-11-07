@@ -6,8 +6,9 @@ import { parseArgs } from 'node:util';
 import { runFlow } from '../src/flow.js';
 import { swapCards } from '../src/swap.js';
 import {
-  applyCurrentRules, loadProxy, proxyOff, proxyOn, proxyStatus, restartEngine, saveProxy, testProxy,
+  applyCurrentRules, loadProxy, proxyOff, proxyOn, proxyStatus, restartEngine, testProxy,
 } from '../src/proxy.js';
+import { addProxies, listProxies, selectProxy } from '../src/proxies.js';
 import { HOTSPOT_CON, getStatus, hotspotActive, hotspotNet, sh } from '../src/system.js';
 
 const usage = `Usage: vpn-hotspot <command> [options]
@@ -22,6 +23,8 @@ Commands:
   proxy    Route hotspot clients through an upstream proxy:
              proxy set <url>   http://, https:// or socks5://[user:pass@]host:port
              proxy set <file>  a WireGuard .conf from your VPN provider
+             proxy list        the saved proxies (manage them at /proxies in the dashboard)
+             proxy use <name>  switch to a saved proxy (name or id)
              proxy test        check the proxy works and show the exit IP
              proxy on | off    start / stop routing clients through it
              proxy status
@@ -141,10 +144,25 @@ async function proxy() {
       if (!arg) throw new Error('Usage: vpn-hotspot proxy set <url | wireguard.conf>');
       // A URL, or a file (a WireGuard .conf) to read.
       const text = /^[a-z0-9]+:\/\//i.test(arg) ? arg : await readFile(arg, 'utf8');
-      const p = await saveProxy(text);
-      const what = p.type === 'wireguard' ? 'WireGuard VPN' : `${p.type} proxy`;
-      console.log(`Saved ${what} ${p.host}:${p.port}${(await restartEngine()) ? ', applied to the running proxy' : ''}.`);
+      const { added } = await addProxies(text);
+      await selectProxy(added[0].id);
+      console.log(`Saved ${added[0].name} (${added[0].host}:${added[0].port}) and switched to it${(await restartEngine()) ? ', applied to the running proxy' : ''}.`);
       console.log('Run "vpn-hotspot proxy test" to check it.');
+      return;
+    }
+    case 'list': {
+      const { proxies } = await listProxies();
+      if (!proxies.length) console.log('No saved proxies. Add one with: vpn-hotspot proxy set <url>');
+      for (const p of proxies) console.log(`${p.active ? '*' : ' '} ${p.id}  ${p.name}  ${p.url}`);
+      return;
+    }
+    case 'use': {
+      if (!arg) throw new Error('Usage: vpn-hotspot proxy use <name | id>');
+      const { proxies } = await listProxies();
+      const hit = proxies.find((p) => p.id === arg) ?? proxies.find((p) => p.name.toLowerCase() === arg.toLowerCase());
+      if (!hit) throw new Error(`No saved proxy "${arg}". See: vpn-hotspot proxy list`);
+      await selectProxy(hit.id);
+      console.log(`Switched to ${hit.name}${(await restartEngine()) ? ', applied to the running proxy' : ''}.`);
       return;
     }
     case 'test': {

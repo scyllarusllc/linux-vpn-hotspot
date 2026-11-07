@@ -5,9 +5,10 @@
 // from a provider's .conf file). Clients need no setup and see no VPN.
 
 import { spawn } from 'node:child_process';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { isIP } from 'node:net';
 import { join } from 'node:path';
+import { getBypass } from './bypass.js';
 import { configDir, loadState, updateState } from './state.js';
 import { asRoot, tryCmd, sh } from './system.js';
 
@@ -143,7 +144,7 @@ function tunnelDns(p) {
   };
 }
 
-export function singBoxConfig(p, { cacheFile }) {
+export function singBoxConfig(p, { cacheFile, bypass = [] }) {
   const wg = p.type === 'wireguard';
   const up = upstreamOf(p);
   const tdns = wg ? tunnelDns(p) : null;
@@ -157,6 +158,8 @@ export function singBoxConfig(p, { cacheFile }) {
         ...(wg ? [tdns.server] : []),
       ],
       rules: [
+        // Bypass domains get their real address, so the client can reach them directly (e.g. Wi-Fi calling).
+        ...(bypass.length ? [{ domain_suffix: bypass, query_type: ['A'], action: 'route', server: 'local' }] : []),
         { query_type: ['A'], action: 'route', server: 'fake' },
         // No IPv6 or HTTPS-record answers, so clients always use the fake IPv4.
         { query_type: ['AAAA', 'HTTPS'], action: 'predefined', rcode: 'NOERROR' },
@@ -174,6 +177,7 @@ export function singBoxConfig(p, { cacheFile }) {
       rules: [
         { inbound: 'dns-in', action: 'hijack-dns' },
         { inbound: 'redirect-in', action: 'sniff' },
+        ...(bypass.length ? [{ domain_suffix: bypass, action: 'route', outbound: 'direct' }] : []),
         ...(wg ? [tdns.rule] : []),
         { ip_is_private: true, action: 'route', outbound: 'direct' },
       ],
@@ -242,6 +246,12 @@ async function writePrivate(path, text) {
 }
 
 export const loadProxy = () => readJsonFile(files.proxy, null);
+
+// proxy.json always holds the proxy in use (what the engine runs); src/proxies.js keeps the full list.
+export async function writeActiveProxy(p) {
+  if (p) await writePrivate(files.proxy, JSON.stringify(p, null, 2));
+  else await rm(files.proxy, { force: true });
+}
 
 export async function saveProxy(raw) {
   const p = parseUpstream(raw);
@@ -355,6 +365,18 @@ export async function testProxy(p) {
   }
 }
 
+// Test one proxy and say where it exits: ipinfo.io through the proxy gives IP, city, state and
+// country in one request. If that service is unreachable, fall back to a plain IP check.
+export async function testAndLocate(p) {
+  const started = Date.now();
+  try {
+    const g = await proxyGeo(p);
+    return { ok: true, ms: Date.now() - started, ...g };
+  } catch {
+    return testProxy(p);
+  }
+}
+
 // Where the proxy exits to the internet: ipinfo.io fetched through the proxy, so
 // it sees the exit IP rather than ours. Returns { ip, city, region, country } (ISO code).
 export async function proxyGeo(p) {
@@ -364,7 +386,7 @@ export async function proxyGeo(p) {
 }
 
 async function writeEngineConfig(p) {
-  await writePrivate(files.singbox, JSON.stringify(singBoxConfig(p, { cacheFile: join(configDir, 'sing-box.db') }), null, 2));
+  await writePrivate(files.singbox, JSON.stringify(singBoxConfig(p, { cacheFile: join(configDir, 'sing-box.db'), bypass: await getBypass() }), null, 2));
   await sh('sing-box', ['check', '-c', files.singbox]);
 }
 

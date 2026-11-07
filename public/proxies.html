@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Linux VPN Hotspot · proxies</title>
+<link rel="stylesheet" href="/fa/css/all.min.css">
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0f1115; --panel: #171a21; --line: #2a2f3a; --text: #e6e8ec; --dim: #8b93a3; --accent: #6ea8fe;
+    --ok: #0ca30c; --todo: #fab219; --fail: #d03b3b;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; font: 14px/1.5 system-ui, sans-serif; background: var(--bg); color: var(--text); }
+  a { color: var(--accent); text-decoration: none; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  h1 i { color: var(--accent); margin-right: 8px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--dim); margin: 28px 0 10px; }
+  h2 i, button i { margin-right: 6px; }
+  .sub { color: var(--dim); margin: 0; max-width: 78ch; }
+  .mono { font-family: ui-monospace, monospace; font-size: 12.5px; }
+  button, .btn { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 6px;
+                 padding: 7px 13px; font: inherit; cursor: pointer; display: inline-flex; align-items: center; }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #0f1115; font-weight: 600; }
+  button.danger { color: var(--fail); }
+  button.danger.confirm { background: var(--fail); border-color: var(--fail); color: #fff; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  body.busy button:disabled { cursor: wait; }
+  button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  input, textarea { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 6px;
+                    padding: 7px 9px; font: inherit; }
+  textarea { width: 100%; font: 12.5px/1.5 ui-monospace, monospace; resize: vertical; min-height: 78px; }
+  label { display: flex; flex-direction: column; gap: 4px; color: var(--dim); font-size: 12px; }
+  .file-btn { position: relative; overflow: hidden; }
+  .file-btn input { position: absolute; inset: 0; opacity: 0; cursor: pointer; padding: 0; }
+
+  .status { display: flex; align-items: center; gap: 10px 14px; flex-wrap: wrap; background: var(--panel);
+            border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin-top: 18px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--dim); flex: none; }
+  .status.ok .dot { background: var(--ok); } .status.warn .dot { background: var(--todo); } .status.bad .dot { background: var(--fail); }
+  .status .grow { flex: 1; min-width: 220px; }
+  .status .note { color: var(--dim); font-size: 13px; }
+
+  .add { display: grid; gap: 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px; }
+  .add .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
+  .add .name { width: 240px; }
+  .hint { color: var(--dim); font-size: 12.5px; margin: 0; }
+
+  .list { display: grid; gap: 10px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px;
+          display: grid; grid-template-columns: 1fr auto; gap: 8px 16px; align-items: center; }
+  .card.active { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
+  .card .title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-weight: 600; font-size: 15px; }
+  .tag { font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; border-radius: 4px;
+         padding: 1px 7px; border: 1px solid var(--line); color: var(--dim); }
+  .tag.active { background: var(--accent); border-color: var(--accent); color: #0f1115; }
+  .tag.on { border-color: var(--ok); color: var(--ok); }
+  .meta { color: var(--dim); display: flex; gap: 6px 16px; flex-wrap: wrap; margin-top: 2px; }
+  .exit { margin-top: 4px; }
+  .exit i { color: var(--accent); margin-right: 6px; }
+  .test.ok { color: var(--ok); } .test.fail { color: var(--fail); }
+  .actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+  .actions button { padding: 5px 10px; font-size: 13px; }
+  .empty { color: var(--dim); text-align: center; padding: 34px 0; background: var(--panel); border: 1px dashed var(--line); border-radius: 8px; }
+  #message { margin-top: 12px; min-height: 20px; white-space: pre-line; }
+  #message.ok { color: var(--ok); } #message.fail { color: var(--fail); }
+  #admin-field { display: none; max-width: 260px; margin-top: 14px; }
+
+  dialog { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 10px; padding: 18px;
+           width: min(560px, 92vw); }
+  dialog::backdrop { background: rgba(0, 0, 0, .6); }
+  dialog form { display: grid; gap: 12px; }
+  dialog .row { display: flex; gap: 8px; justify-content: flex-end; }
+  @media (max-width: 640px) { .card { grid-template-columns: 1fr; } .actions { justify-content: flex-start; } .add .name { width: 100%; } }
+</style>
+<link rel="stylesheet" href="/assets/layout.css">
+</head>
+<body>
+<!--#header-->
+<main>
+  <h1><i class="fa-solid fa-shield-halved" aria-hidden="true"></i>Proxies</h1>
+  <p class="sub">Save as many proxies and VPNs as you like, test them, and pick the one hotspot clients go through.
+    You can switch from the <a href="/#proxy">Overview</a> page too. Passwords and keys stay on the laptop.</p>
+
+  <div class="status" id="status" role="status"></div>
+  <label id="admin-field">Admin password
+    <input id="admin" type="password" autocomplete="current-password" placeholder="needed on this device">
+  </label>
+  <div id="message" role="status"></div>
+
+  <h2><i class="fa-solid fa-list" aria-hidden="true"></i>Saved <span id="count"></span>
+    <button type="button" id="test-all" style="float:right;text-transform:none;letter-spacing:0;font-size:13px;padding:5px 12px">
+      <i class="fa-solid fa-flask" aria-hidden="true"></i>Test all</button></h2>
+  <div class="list" id="list"></div>
+
+  <h2><i class="fa-solid fa-route" aria-hidden="true"></i>Bypass list</h2>
+  <form class="add" id="bypass-form">
+    <label>Domains that skip the proxy (one per line)
+      <textarea id="bypass-text" rows="3" spellcheck="false" autocomplete="off" placeholder="3gppnetwork.org"></textarea>
+    </label>
+    <div class="row">
+      <button type="submit" class="primary" id="bypass-save"><i class="fa-solid fa-floppy-disk" aria-hidden="true"></i>Save</button>
+      <button type="button" id="bypass-reset"><i class="fa-solid fa-rotate-left" aria-hidden="true"></i>Reset to default</button>
+    </div>
+    <p class="hint">Phones get the real address for these names and reach them straight through the laptop's own connection,
+      not through the proxy; every subdomain is included. <b>3gppnetwork.org</b> is what <b>Wi-Fi calling and Wi-Fi texts</b> need
+      (the carrier's gateway uses UDP, which a proxy can't carry). The site then sees the laptop's real IP, not the proxy's.
+      After a change, turn the phone's Wi-Fi off and on so it forgets the old answers.</p>
+  </form>
+
+  <h2><i class="fa-solid fa-plus" aria-hidden="true"></i>Add</h2>
+  <form class="add" id="add-form">
+    <label>Proxy URL or WireGuard config
+      <textarea id="add-url" spellcheck="false" autocomplete="off"
+        placeholder="socks5://user:pass@host:1080&#10;http://host:8080&#10;https://host:443&#10;or paste a WireGuard [Interface] … [Peer] config"></textarea>
+    </label>
+    <div class="row">
+      <label class="name">Name (optional)<input id="add-name" maxlength="60" placeholder="e.g. Mullvad Zurich"></label>
+      <span class="btn file-btn" role="button"><i class="fa-solid fa-file-import" aria-hidden="true"></i>Load .conf files
+        <input type="file" id="add-file" accept=".conf,text/plain" multiple aria-label="Load WireGuard .conf files"></span>
+      <button type="submit" class="primary" id="add-btn"><i class="fa-solid fa-plus" aria-hidden="true"></i>Add</button>
+    </div>
+    <p class="hint">One proxy per line adds several at once. Supported: <b>SOCKS5</b>, <b>HTTP</b>, <b>HTTPS</b> and
+      <b>WireGuard</b> (the .conf from Mullvad, Proton VPN, Surfshark, IVPN, Windscribe, your own server…).</p>
+  </form>
+</main>
+
+<dialog id="edit" aria-labelledby="edit-title">
+  <form method="dialog" id="edit-form">
+    <strong id="edit-title">Edit proxy</strong>
+    <label>Name<input id="edit-name" maxlength="60" required></label>
+    <label>New address <span id="edit-current" class="mono"></span>
+      <textarea id="edit-url" spellcheck="false" autocomplete="off" placeholder="Leave empty to keep the current address"></textarea>
+    </label>
+    <div class="row">
+      <button type="button" id="edit-cancel">Cancel</button>
+      <button type="submit" class="primary" id="edit-save"><i class="fa-solid fa-floppy-disk" aria-hidden="true"></i>Save</button>
+    </div>
+  </form>
+</dialog>
+<!--#footer-->
+
+<script type="module">
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+const flag = (cc) => (/^[A-Z]{2}$/.test(cc ?? '') ? String.fromCodePoint(...[...cc].map((c) => 0x1f1a5 + c.charCodeAt(0))) : '');
+const regionNames = new Intl.DisplayNames([], { type: 'region' });
+const countryName = (cc) => { try { return regionNames.of(cc); } catch { return cc; } };
+// "🇺🇸 Costa Mesa, California, United States · 204.16.235.167"
+const where = (g) => (g?.ip ? `${flag(g.country)} ${esc([g.city, g.region, g.country && countryName(g.country)].filter(Boolean).join(', '))} · <span class="mono">${esc(g.ip)}</span>`.trim() : '');
+const typeLabel = (t) => (t === 'wireguard' ? 'WireGuard' : t.toUpperCase());
+
+let state = null;
+let busyNow = false;
+let editingId = null;
+let bypassDirty = false;
+
+async function api(method, path, body) {
+  const headers = body ? { 'Content-Type': 'application/json' } : {};
+  if (method === 'POST' && $('admin').value) headers['X-Admin-Password'] = $('admin').value;
+  const res = await fetch(path, { method, headers, body: body ? JSON.stringify(body) : undefined });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || res.statusText);
+  return data;
+}
+
+function say(text, kind = '') {
+  $('message').textContent = text;
+  $('message').className = kind;
+}
+
+// Runs one action with every button locked, then refreshes the list.
+async function busy(fn) {
+  busyNow = true;
+  document.body.classList.add('busy');
+  document.querySelectorAll('button').forEach((b) => (b.disabled = true));
+  try { await fn(); } catch (e) { say(e.message, 'fail'); }
+  finally {
+    busyNow = false;
+    document.body.classList.remove('busy');
+    await load();
+  }
+}
+
+const ago = (t) => {
+  const s = Math.max(0, Math.round((Date.now() - t) / 1000));
+  return s < 60 ? 'just now' : s < 3600 ? `${Math.round(s / 60)} min ago` : s < 86400 ? `${Math.round(s / 3600)} h ago` : `${Math.round(s / 86400)} d ago`;
+};
+
+function renderStatus() {
+  const s = state;
+  const active = s.proxies.find((p) => p.active);
+  const broken = s.enabled && !s.engine;
+  const notRouting = s.enabled && !broken && s.routing === false;
+  let cls = '', title, note = '';
+  if (!s.proxies.length) { title = 'No proxies yet'; note = 'Add one below to route hotspot clients through it.'; }
+  else if (!active) { title = 'No proxy selected'; note = 'Choose one with Use.'; }
+  else if (broken) { cls = 'bad'; title = `${esc(active.name)}: on, but sing-box is not running`; note = 'Clients have no internet until it is restarted.'; }
+  else if (notRouting) { cls = 'warn'; title = `${esc(active.name)}: on, but phones are NOT going through it`; note = esc(s.routingIssue ?? ''); }
+  else if (s.enabled) {
+    cls = 'ok';
+    const g = s.geo;
+    title = `Routing through ${esc(active.name)}`;
+    note = g ? `Exit: ${where(g)}` : 'Locating the exit…';
+  } else { title = `${esc(active.name)} is selected, routing is off`; note = 'Hotspot clients go direct. Turn routing on to use it (the hotspot must be running).'; }
+  $('status').className = `status ${cls}`;
+  const btn = !active ? '' : (s.enabled && !broken && !notRouting)
+    ? '<button type="button" data-top="off"><i class="fa-solid fa-ban" aria-hidden="true"></i>Turn routing off</button>'
+    : `<button type="button" class="primary" data-top="on"><i class="fa-solid fa-power-off" aria-hidden="true"></i>${broken ? 'Restart' : notRouting ? 'Fix routing' : 'Turn routing on'}</button>`;
+  $('status').innerHTML = `<span class="dot" aria-hidden="true"></span><div class="grow"><b>${title}</b><div class="note">${note}</div></div>${btn}`;
+}
+
+function testLine(t) {
+  if (!t) return '<span>not tested</span>';
+  return t.ok
+    ? `<span class="test ok"><i class="fa-solid fa-check" aria-hidden="true"></i>Works · ${t.ms} ms · ${ago(t.at)}</span>`
+    : `<span class="test fail" title="${esc(t.error)}"><i class="fa-solid fa-xmark" aria-hidden="true"></i>Failed · ${esc(t.error.split('\n')[0].slice(0, 90))} · ${ago(t.at)}</span>`;
+}
+
+// Where this proxy comes out: live for the one in use, else from its last test.
+function exitLine(p) {
+  const g = p.active && state.geo?.ip ? state.geo : p.lastTest?.ok ? p.lastTest : null;
+  return g?.ip ? `<div class="exit"><i class="fa-solid fa-location-dot" aria-hidden="true"></i>${where(g)}</div>` : '';
+}
+
+function render() {
+  renderStatus();
+  // Don't overwrite what is being typed.
+  if (!bypassDirty && document.activeElement !== $('bypass-text')) $('bypass-text').value = (state.bypass ?? []).join('\n');
+  $('count').textContent = state.proxies.length ? `(${state.proxies.length})` : '';
+  $('test-all').hidden = state.proxies.length < 2;
+  $('list').innerHTML = state.proxies.map((p) => `
+    <div class="card ${p.active ? 'active' : ''}" data-id="${esc(p.id)}">
+      <div>
+        <div class="title"><span>${esc(p.name)}</span>
+          <span class="tag">${typeLabel(p.type)}</span>
+          ${p.active ? `<span class="tag active">In use</span>${state.enabled ? '<span class="tag on">Routing on</span>' : ''}` : ''}</div>
+        <div class="meta"><span class="mono" title="${esc(p.url)}">${esc(p.url)}</span>${testLine(p.lastTest)}</div>
+        ${exitLine(p)}
+      </div>
+      <div class="actions">
+        ${p.active ? '' : '<button type="button" class="primary" data-act="use"><i class="fa-solid fa-circle-check" aria-hidden="true"></i>Use</button>'}
+        <button type="button" data-act="test"><i class="fa-solid fa-flask" aria-hidden="true"></i>Test</button>
+        <button type="button" data-act="edit"><i class="fa-solid fa-pen" aria-hidden="true"></i>Edit</button>
+        <button type="button" class="danger" data-act="delete"><i class="fa-solid fa-trash" aria-hidden="true"></i>Delete</button>
+      </div>
+    </div>`).join('') || '<div class="empty"><i class="fa-solid fa-shield-halved" aria-hidden="true"></i> Nothing saved yet. Add a proxy or a WireGuard config below.</div>';
+}
+
+async function load() {
+  try { state = await api('GET', '/api/proxies'); } catch (e) { return say(e.message, 'fail'); }
+  if (!busyNow && !$('edit').open) render();
+}
+
+const find = (id) => state.proxies.find((p) => p.id === id);
+const fmtTest = (r) => (r.ok ? `works, exit ${[r.city, r.region, r.country && countryName(r.country)].filter(Boolean).join(', ')} ${r.ip} (${r.ms} ms)`.replace('exit  ', 'exit ') : `failed: ${r.error}`);
+
+async function testOne(p) {
+  say(`Testing ${p.name}…`);
+  const r = await api('POST', '/api/proxies/test', { id: p.id });
+  say(`${p.name}: ${fmtTest(r)}`, r.ok ? 'ok' : 'fail');
+  return r;
+}
+
+let armed = null;
+$('list').addEventListener('click', (ev) => {
+  const b = ev.target.closest('button[data-act]');
+  if (!b) return;
+  const id = b.closest('.card').dataset.id;
+  const p = find(id);
+  const act = b.dataset.act;
+  if (act === 'delete') {
+    // Two clicks: the first arms the button so a slip can't delete anything.
+    if (armed !== b) {
+      if (armed) { armed.classList.remove('confirm'); armed.textContent = 'Delete'; }
+      armed = b; b.classList.add('confirm'); b.textContent = 'Click again to delete';
+      setTimeout(() => { if (armed === b) { b.classList.remove('confirm'); b.innerHTML = '<i class="fa-solid fa-trash" aria-hidden="true"></i>Delete'; armed = null; } }, 3500);
+      return;
+    }
+    armed = null;
+    return busy(async () => { state = await api('POST', '/api/proxies/delete', { id }); say(`Deleted ${p.name}.`, 'ok'); });
+  }
+  if (act === 'use') {
+    return busy(async () => {
+      say(`Switching to ${p.name}…`);
+      const r = await api('POST', '/api/proxies/select', { id });
+      say(r.applied ? `Now using ${p.name}. Phones switched over (connections drop for about a second).` : `Now using ${p.name}.`, 'ok');
+    });
+  }
+  if (act === 'test') return busy(() => testOne(p));
+  if (act === 'edit') {
+    editingId = id;
+    $('edit-name').value = p.name;
+    $('edit-url').value = '';
+    $('edit-current').textContent = `(now ${p.url})`;
+    $('edit').showModal();
+    $('edit-name').focus();
+  }
+});
+
+$('edit-cancel').addEventListener('click', () => $('edit').close());
+$('edit').addEventListener('close', () => { editingId = null; if (state) render(); });
+$('edit-form').addEventListener('submit', (ev) => {
+  ev.preventDefault();
+  const id = editingId, name = $('edit-name').value, url = $('edit-url').value;
+  $('edit').close();
+  busy(async () => {
+    await api('POST', '/api/proxies/update', { id, name, ...(url.trim() && { url }) });
+    say(url.trim() ? 'Saved. If it is the one in use, phones switch over now.' : 'Renamed.', 'ok');
+  });
+});
+
+$('test-all').addEventListener('click', () => busy(async () => {
+  let okCount = 0;
+  for (const p of state.proxies) { if ((await testOne(p)).ok) okCount++; }
+  say(`Tested ${state.proxies.length}: ${okCount} work, ${state.proxies.length - okCount} failed.`, okCount ? 'ok' : 'fail');
+}));
+
+$('status').addEventListener('click', (ev) => {
+  const b = ev.target.closest('button[data-top]');
+  if (!b) return;
+  busy(async () => {
+    say('Waiting for the password dialog on the laptop…');
+    await api('POST', `/api/proxy/${b.dataset.top}`, {});
+    say(b.dataset.top === 'on' ? 'Routing on: hotspot clients now go through the proxy.' : 'Routing off: hotspot clients go direct.', 'ok');
+  });
+});
+
+$('bypass-text').addEventListener('input', () => { bypassDirty = true; });
+$('bypass-reset').addEventListener('click', () => {
+  $('bypass-text').value = (state.bypassDefault ?? []).join('\n');
+  bypassDirty = true;
+  say('Default list filled in. Click Save to apply it.');
+});
+$('bypass-form').addEventListener('submit', (ev) => {
+  ev.preventDefault();
+  busy(async () => {
+    const r = await api('POST', '/api/proxies/bypass', { domains: $('bypass-text').value });
+    bypassDirty = false;
+    say(`${r.bypass.length ? `Saved ${r.bypass.length} domain${r.bypass.length === 1 ? '' : 's'}` : 'Bypass list is empty'}. Turn the phone's Wi-Fi off and on so it picks up the change.`, 'ok');
+  });
+});
+
+$('add-file').addEventListener('change', async (ev) => {
+  const files = [...(ev.target.files ?? [])];
+  const texts = await Promise.all(files.map((f) => f.text()));
+  const cur = $('add-url').value.trim();
+  $('add-url').value = [cur, ...texts.map((t) => t.trim())].filter(Boolean).join('\n');
+  if (files.length === 1 && !$('add-name').value) $('add-name').value = files[0].name.replace(/\.conf$/i, '');
+  ev.target.value = '';
+  say(`Loaded ${files.map((f) => f.name).join(', ')}. Click Add.`);
+});
+
+$('add-form').addEventListener('submit', (ev) => {
+  ev.preventDefault();
+  busy(async () => {
+    const r = await api('POST', '/api/proxies/add', { url: $('add-url').value, name: $('add-name').value });
+    $('add-url').value = ''; $('add-name').value = '';
+    say(`Added ${r.added} proxy${r.added === 1 ? '' : 's'}.${r.proxies.length === r.added ? ' It is selected: turn routing on above.' : ' Press Test to check them.'}`, 'ok');
+  });
+});
+
+// Hotspot clients on this page need the admin password; the laptop itself does not.
+api('GET', '/api/whoami').then((w) => { if (!w.local) $('admin-field').style.display = 'flex'; }).catch(() => {});
+
+await load();
+setInterval(() => { if (!busyNow && !$('edit').open) load(); }, 5000);
+</script>
+</body>
+</html>
