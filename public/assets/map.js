@@ -166,16 +166,46 @@ function render(hist, status, proxy, x = {}) {
   // Devices: size by current traffic (area ∝ rate), position by signal.
   const now = Date.now();
   const maxRate = Math.max(1e5, ...hist.devices.map((d) => { const l = latest(d); return (l.down ?? 0) + (l.up ?? 0); }));
+  // Place devices so no two boxes (bubble + name + stats) overlap. Each keeps its signal
+  // radius where it can: try its own angle first, then swing around the ring, then step
+  // the radius in and out. Biggest (busiest) devices pick first and stay put.
+  const sizeOf = (d) => { const l = latest(d); return 24 + 32 * Math.sqrt(((l.down ?? 0) + (l.up ?? 0)) / maxRate); };
+  const boxOf = (x0, y0, size, tall = 0) => ({ x: x0, y: y0, hw: 66, hh: size / 2 + 26 + tall });
+  const clash = (a, b) => Math.abs(a.x - b.x) < a.hw + b.hw && Math.abs(a.y - b.y) < a.hh + b.hh;
+  const taken = [boxOf(cx, cy, 46), boxOf(cx, ry, 34)];
+  if (proxy?.enabled) taken.push(boxOf(cx + Math.min(220, W / 2 - 90), ry, 34));
+  const spot = new Map();
+  const order = [...hist.devices].sort((p, q) => sizeOf(q) - sizeOf(p) || (p.mac < q.mac ? -1 : 1));
+  for (const d of order) {
+    const size = sizeOf(d);
+    const a0 = angleOf(d.mac);
+    const base = Math.abs(Math.sin(a0) + 1) < 0.15 ? a0 + 0.6 : a0;
+    const r0 = rOf(d.online ? d.signal : SIG_MIN);
+    const at = (ang, r) => ({
+      ang, x: Math.max(60, Math.min(W - 60, cx + r * Math.cos(ang))),
+      y: Math.max(24, Math.min(H - 30, cy + r * Math.sin(ang))),
+    });
+    let best = null;
+    search:
+    for (const dr of [0, 28, -28, 56, -56, 84, -84]) {
+      const r = Math.max(70, Math.min(maxR, r0 + dr));
+      for (let k = 0; k <= 30; k++) {
+        for (const sgn of k ? [1, -1] : [1]) {
+          const c = at(base + sgn * k * 0.1, r);
+          if (!taken.some((t) => clash(boxOf(c.x, c.y, size), t))) { best = c; break search; }
+        }
+      }
+    }
+    best ??= at(base, r0); // ring full: let it overlap rather than vanish
+    spot.set(d.mac, best);
+    taken.push(boxOf(best.x, best.y, size));
+  }
+
   for (const d of hist.devices) {
     const l = latest(d);
     const rate = (l.down ?? 0) + (l.up ?? 0);
-    const size = 24 + 32 * Math.sqrt(rate / maxRate);
-    const a = angleOf(d.mac);
-    // Keep devices off the router's spot straight above the hub.
-    const ang = Math.abs(Math.sin(a) + 1) < 0.15 ? a + 0.6 : a;
-    const r = rOf(d.online ? d.signal : SIG_MIN);
-    const x0 = Math.max(60, Math.min(W - 60, cx + r * Math.cos(ang)));
-    const y0 = Math.max(24, Math.min(H - 30, cy + r * Math.sin(ang)));
+    const size = sizeOf(d);
+    const { x: x0, y: y0 } = spot.get(d.mac);
     const color = colorOf(d.mac);
     const active = d.online && rate > 0;
     line(cx, cy, x0, y0, active ? 'nm-active' : '', active ? color : null);
