@@ -29,7 +29,7 @@ export function view(entry, activeId) {
   const p = entry.proxy;
   return {
     id: entry.id, name: entry.name, type: p.type, host: p.host, port: p.port,
-    url: proxyUrl(p, { mask: true }), auth: Boolean(p.username), active: entry.id === activeId,
+    url: proxyUrl(p, { mask: true }), auth: Boolean(p.username || p.type === 'trojan'), active: entry.id === activeId,
     lastTest: entry.lastTest ?? null, addedAt: entry.addedAt,
   };
 }

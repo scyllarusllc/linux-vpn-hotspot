@@ -115,7 +115,7 @@
   <form class="add" id="add-form">
     <label>Proxy URL or WireGuard config
       <textarea id="add-url" spellcheck="false" autocomplete="off"
-        placeholder="socks5://user:pass@host:1080&#10;http://host:8080&#10;https://host:443&#10;or paste a WireGuard [Interface] … [Peer] config"></textarea>
+        placeholder="socks5://user:pass@host:1080&#10;http://host:8080&#10;https://host:443&#10;trojan://password@host:443?sni=example.com&#10;or paste a WireGuard [Interface] … [Peer] config"></textarea>
     </label>
     <div class="row">
       <label class="name">Name (optional)<input id="add-name" maxlength="60" placeholder="e.g. Mullvad Zurich"></label>
@@ -151,7 +151,7 @@ const regionNames = new Intl.DisplayNames([], { type: 'region' });
 const countryName = (cc) => { try { return regionNames.of(cc); } catch { return cc; } };
 // "🇺🇸 Costa Mesa, California, United States · 204.16.235.167"
 const where = (g) => (g?.ip ? `${flag(g.country)} ${esc([g.city, g.region, g.country && countryName(g.country)].filter(Boolean).join(', '))} · <span class="mono">${esc(g.ip)}</span>`.trim() : '');
-const typeLabel = (t) => (t === 'wireguard' ? 'WireGuard' : t.toUpperCase());
+const typeLabel = (t) => (t === 'wireguard' ? 'WireGuard' : t === 'trojan' ? 'Trojan' : t.toUpperCase());
 
 let state = null;
 let busyNow = false;

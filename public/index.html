@@ -534,7 +534,7 @@ const regionNames = new Intl.DisplayNames([], { type: 'region' });
 const countryName = (cc) => { try { return regionNames.of(cc); } catch { return cc; } };
 
 // An icon for how each proxy connects.
-const typeIcon = { wireguard: 'key', socks5: 'plug', http: 'globe', https: 'lock' };
+const typeIcon = { wireguard: 'key', socks5: 'plug', http: 'globe', https: 'lock', trojan: 'user-secret' };
 
 // One tile per saved proxy: icon, name, kind and where it exits; the one in use is lit (green when phones are routed through it).
 function proxyChips(p) {
@@ -543,7 +543,7 @@ function proxyChips(p) {
   const chips = list.map((x) => {
     const g = x.active && p.geo?.ip ? p.geo : x.lastTest?.ok ? x.lastTest : null;
     const where = g ? [flag(g.country), g.city || g.region || countryName(g.country)].filter(Boolean).join(' ') : '';
-    const kind = x.type === 'wireguard' ? 'WireGuard' : x.type.toUpperCase();
+    const kind = x.type === 'wireguard' ? 'WireGuard' : x.type === 'trojan' ? 'Trojan' : x.type.toUpperCase();
     const icon = ui.switching === x.id ? 'fa-spinner fa-spin' : `fa-${typeIcon[x.type] ?? 'shield-halved'}`;
     return `<button type="button" role="radio" class="pchip${x.active && live ? ' live' : ''}" aria-checked="${x.active}" data-id="${esc(x.id)}"
         title="${x.active ? 'In use' : 'Switch to'} ${esc(x.name)}${live && !x.active ? ': phones move over right away' : ''}">

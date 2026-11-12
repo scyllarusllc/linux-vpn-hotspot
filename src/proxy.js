@@ -20,7 +20,7 @@ export const FAKE_RANGE = '198.18.0.0/15';
 export const LOCAL_PORT = 12346;
 const TEST_PORT = 12347;
 export const UNIT = 'wifi-extender-proxy';
-const DEFAULT_PORTS = { http: 80, https: 443, socks5: 1080 };
+const DEFAULT_PORTS = { http: 80, https: 443, socks5: 1080, trojan: 443 };
 // Destinations that bypass the proxy: LAN, the hotspot itself, multicast...
 const PRIVATE = ['0.0.0.0/8', '10.0.0.0/8', '100.64.0.0/10', '127.0.0.0/8', '169.254.0.0/16',
   '172.16.0.0/12', '192.168.0.0/16', '224.0.0.0/4', '240.0.0.0/4'];
@@ -33,17 +33,32 @@ const files = {
   nft: join(configDir, 'rules.nft'),
 };
 
-// "socks5://user:pass@host:1080", "http://host:8080", "https://host?insecure=1"
+// "socks5://user:pass@host:1080", "http://host:8080", "https://host?insecure=1",
+// "trojan://password@host:443?sni=example.com&allowInsecure=1&type=ws&path=/ws&host=cdn.example.com#name"
 export function parseProxyUrl(raw) {
   let u;
   try {
     u = new URL(raw.trim());
   } catch {
-    throw new Error('Not a URL. Use http://, https:// or socks5://host:port');
+    throw new Error('Not a URL. Use http://, https://, socks5:// or trojan://host:port');
   }
-  const type = { 'http:': 'http', 'https:': 'https', 'socks5:': 'socks5', 'socks5h:': 'socks5' }[u.protocol];
-  if (!type) throw new Error(`Unsupported scheme "${u.protocol}". Use http, https or socks5.`);
+  const type = { 'http:': 'http', 'https:': 'https', 'socks5:': 'socks5', 'socks5h:': 'socks5', 'trojan:': 'trojan' }[u.protocol];
+  if (!type) throw new Error(`Unsupported scheme "${u.protocol}". Use http, https, socks5 or trojan.`);
   if (!u.hostname) throw new Error('Missing proxy host.');
+  if (type === 'trojan') {
+    const q = u.searchParams;
+    const password = decodeURIComponent(u.username);
+    if (!password) throw new Error('Trojan needs a password: trojan://password@host:port');
+    const net = q.get('type') ?? 'tcp';
+    if (!['tcp', 'ws'].includes(net)) throw new Error(`Trojan transport "${net}" is not supported. Use tcp or ws.`);
+    return {
+      type, host: u.hostname.replace(/^\[|\]$/g, ''), port: Number(u.port) || DEFAULT_PORTS.trojan,
+      username: null, password,
+      sni: q.get('sni') || q.get('peer') || null,
+      insecure: ['1', 'true'].includes(q.get('allowInsecure') ?? q.get('insecure') ?? ''),
+      ...(net === 'ws' && { transport: 'ws', path: q.get('path') || '/', wsHost: q.get('host') || null }),
+    };
+  }
   return {
     type,
     host: u.hostname.replace(/^\[|\]$/g, ''),
@@ -106,6 +121,15 @@ export function parseUpstream(raw) {
 // Keys never leave proxy.json: a WireGuard upstream displays as wireguard://endpoint.
 export function proxyUrl(p, { mask = false } = {}) {
   if (p.type === 'wireguard') return `wireguard://${p.host.includes(':') ? `[${p.host}]` : p.host}:${p.port}`;
+  if (p.type === 'trojan') {
+    const host = p.host.includes(':') ? `[${p.host}]` : p.host;
+    const q = new URLSearchParams();
+    if (p.sni) q.set('sni', p.sni);
+    if (p.insecure) q.set('allowInsecure', '1');
+    if (p.transport === 'ws') { q.set('type', 'ws'); q.set('path', p.path ?? '/'); if (p.wsHost) q.set('host', p.wsHost); }
+    const qs = q.toString();
+    return `trojan://${mask ? '****' : encodeURIComponent(p.password)}@${host}:${p.port}${qs ? `?${qs}` : ''}`;
+  }
   const auth = p.username ? `${encodeURIComponent(p.username)}${p.password ? `:${mask ? '****' : encodeURIComponent(p.password)}` : ''}@` : '';
   const host = p.host.includes(':') ? `[${p.host}]` : p.host;
   return `${p.type}://${auth}${host}:${p.port}${p.insecure ? '?insecure=1' : ''}`;
@@ -123,6 +147,13 @@ function upstreamOf(p) {
       }],
       // The VPN server's own name must be looked up outside the tunnel.
       domain_resolver: 'local',
+    };
+  }
+  if (p.type === 'trojan') {
+    return {
+      type: 'trojan', tag: 'proxy', server: p.host, server_port: p.port, password: p.password,
+      tls: { enabled: true, server_name: p.sni ?? p.wsHost ?? p.host, insecure: Boolean(p.insecure) },
+      ...(p.transport === 'ws' && { transport: { type: 'ws', path: p.path ?? '/', ...(p.wsHost && { headers: { Host: p.wsHost } }) } }),
     };
   }
   const auth = p.username ? { username: p.username, password: p.password ?? '' } : {};
@@ -314,14 +345,15 @@ async function engineServes(p) {
 let testQueue = Promise.resolve();
 function withTestEngine(p, fn) {
   const run = async () => {
-    const tdns = tunnelDns(p);
+    // Only WireGuard needs names resolved inside the tunnel; Trojan/HTTP/SOCKS resolve on their side.
+    const tdns = p.type === 'wireguard' ? tunnelDns(p) : null;
     const cfg = {
       log: { level: 'warn' },
-      dns: { servers: [{ type: 'local', tag: 'local' }, tdns.server], final: 'local' },
+      dns: { servers: [{ type: 'local', tag: 'local' }, ...(tdns ? [tdns.server] : [])], final: 'local' },
       inbounds: [{ type: 'mixed', tag: 'test-in', listen: '127.0.0.1', listen_port: TEST_PORT }],
-      endpoints: [upstreamOf(p)],
-      outbounds: [{ type: 'direct', tag: 'direct' }],
-      route: { rules: [tdns.rule], final: 'proxy', default_domain_resolver: 'local' },
+      endpoints: p.type === 'wireguard' ? [upstreamOf(p)] : [],
+      outbounds: [...(p.type === 'wireguard' ? [] : [upstreamOf(p)]), { type: 'direct', tag: 'direct' }],
+      route: { rules: tdns ? [tdns.rule] : [], final: 'proxy', default_domain_resolver: 'local' },
     };
     await writePrivate(files.singboxTest, JSON.stringify(cfg, null, 2));
     const child = spawn('sing-box', ['run', '-c', files.singboxTest], { stdio: ['ignore', 'ignore', 'pipe'] });
@@ -342,11 +374,11 @@ function withTestEngine(p, fn) {
 
 // Runs fn(curlArgs) with curl options that reach the internet through p. HTTP/SOCKS:
 // the upstream itself (socks5h, so names resolve on the proxy side like sing-box does).
-// WireGuard: curl can't speak it, so through the engine's local port, or a short-lived
+// WireGuard and Trojan: curl can't speak them, so through the engine's local port, or a short-lived
 // test engine when it isn't running this upstream (e.g. Test before Enable).
 // testEngine: false skips the test engine (returns null instead), for frequent background checks.
 export async function viaUpstream(p, fn, { testEngine = true } = {}) {
-  if (p.type !== 'wireguard') {
+  if (p.type !== 'wireguard' && p.type !== 'trojan') {
     const url = proxyUrl(p).replace(/^socks5:/, 'socks5h:').replace(/\?insecure=1$/, '');
     return fn(['-x', url, ...(p.insecure ? ['--proxy-insecure'] : [])]);
   }

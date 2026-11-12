@@ -21,7 +21,7 @@ Commands:
   swap     Swap the cards: uplink becomes hotspot and vice versa (keeps SSID/password)
   port80   Let hotspot clients open http://<gateway> (re-run after a reboot)
   proxy    Route hotspot clients through an upstream proxy:
-             proxy set <url>   http://, https:// or socks5://[user:pass@]host:port
+             proxy set <url>   http://, https://, socks5://[user:pass@]host:port or trojan://password@host:port
              proxy set <file>  a WireGuard .conf from your VPN provider
              proxy list        the saved proxies (manage them at /proxies in the dashboard)
              proxy use <name>  switch to a saved proxy (name or id)

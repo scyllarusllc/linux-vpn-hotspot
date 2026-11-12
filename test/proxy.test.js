@@ -140,3 +140,21 @@ test('bypass domains get real DNS answers and leave directly, ahead of the fake-
   assert.equal(none.dns.rules[0].server, 'fake');
   assert.ok(!none.route.rules.some((r) => r.domain_suffix));
 });
+
+test('trojan: parses URL, builds sing-box outbound, masks password', async () => {
+  const { parseProxyUrl, proxyUrl, singBoxConfig } = await import('../src/proxy.js');
+  const p = parseProxyUrl('trojan://p%40ss@example.com:8443?sni=cdn.example.com&allowInsecure=1&type=ws&path=/w&host=h.example.com#x');
+  assert.equal(p.type, 'trojan');
+  assert.equal(p.password, 'p@ss');
+  assert.equal(p.port, 8443);
+  assert.equal(parseProxyUrl('trojan://pw@example.com').port, 443);
+  assert.throws(() => parseProxyUrl('trojan://example.com'), /password/);
+  assert.throws(() => parseProxyUrl('trojan://pw@example.com?type=grpc'), /transport/);
+  assert.match(proxyUrl(p, { mask: true }), /^trojan:\/\/\*\*\*\*@example\.com:8443\?/);
+  assert.deepEqual(parseProxyUrl(proxyUrl(p)), p);
+  const out = singBoxConfig(p, { cacheFile: '/tmp/c' }).outbounds.find((o) => o.tag === 'proxy');
+  assert.equal(out.type, 'trojan');
+  assert.equal(out.tls.server_name, 'cdn.example.com');
+  assert.equal(out.tls.insecure, true);
+  assert.deepEqual(out.transport, { type: 'ws', path: '/w', headers: { Host: 'h.example.com' } });
+});
