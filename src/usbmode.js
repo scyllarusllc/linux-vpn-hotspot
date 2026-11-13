@@ -28,7 +28,7 @@ export async function fixUsbWifi() {
   const devices = (await sh('nmcli', ['dev'])).trim();
   const wifi = (await wifiDevices()).filter((d) => d.type === 'wifi').length;
   if (!candidates.length && wifi < 2) {
-    throw Object.assign(new Error('No USB adapter in "CDROM mode" found and only one Wi-Fi card is visible. Plug the adapter in (try another USB port) and try again.'), { status: 409 });
+    throw Object.assign(new Error('No USB adapter in "CDROM mode" found and only one Wi-Fi card is visible. Plug the adapter in (try another USB port) and try again, or open /wifi-check to see why.'), { status: 409 });
   }
   return { candidates, wifi, devices };
 }

@@ -14,6 +14,7 @@ import { runFlow } from './flow.js';
 import QRCode from 'qrcode';
 import { swapCards, switchRoles, ufwScript } from './swap.js';
 import { fixUsbWifi } from './usbmode.js';
+import { diagnose, gatherWifiDiag, replugUsb } from './wifidiag.js';
 import { DEFAULT_BYPASS, getBypass, parseBypass, setBypass } from './bypass.js';
 import { addProxies, getProxy, listProxies, recordTest, removeProxy, selectProxy, updateProxy } from './proxies.js';
 import { firewallCheck } from './firewall.js';
@@ -56,6 +57,7 @@ const pages = {
   '/hunt': new URL('../public/hunt.html', import.meta.url),
   '/log': new URL('../public/log.html', import.meta.url),
   '/proxies': new URL('../public/proxies.html', import.meta.url),
+  '/wifi-check': new URL('../public/wifi-check.html', import.meta.url),
 };
 // Shared header and footer, put into every page at <!--#header--> / <!--#footer-->.
 // The nav link for the current page gets aria-current. Read per request, so edits show on reload.
@@ -349,6 +351,14 @@ const routes = {
     await withRoot(async () => { res = await fixUsbWifi(); });
     logEvent('server', res.candidates.length ? `USB Wi-Fi adapter switched: ${res.candidates.map((c) => `${c.vendor}:${c.product}`).join(', ')}` : 'USB Wi-Fi adapter already switched', req);
     return res;
+  },
+  // Why only one Wi-Fi card is visible: USB bus, drivers, kernel log, rfkill, NetworkManager (no root).
+  'GET /api/wifi-check': async () => diagnose(await gatherWifiDiag()),
+  // Software replug of one USB adapter, so its driver tries again. Needs root.
+  'POST /api/wifi-check/replug': async (body, _who, _url, req) => {
+    await withRoot(() => replugUsb(String(body.port ?? '')));
+    logEvent('server', `USB device on port ${body.port} replugged in software`, req);
+    return diagnose(await gatherWifiDiag());
   },
   // Everything the map shows beyond /api/devices and /api/status, keyed by MAC.
   'GET /api/map': async () => {
