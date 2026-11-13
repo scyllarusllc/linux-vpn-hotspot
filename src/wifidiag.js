@@ -95,7 +95,9 @@ export function isWifiCandidate(d, wifi = []) {
   if (wifi.some((w) => w.usbPort === d.port)) return true;
   if (/bluetooth/i.test(d.name) || d.interfaces.some((i) => ['09', 'e0'].includes(i.cls))) return false;
   if (CD_MODE.test(d.name) || WIFI_NAME.test(d.name)) return true;
-  return WIFI_VENDORS.has(d.vendor) && d.interfaces.some((i) => i.cls === 'ff');
+  // A storage interface from a Wi-Fi vendor is an adapter still in CDROM mode (card readers aside).
+  if (/reader/i.test(d.name)) return false;
+  return WIFI_VENDORS.has(d.vendor) && d.interfaces.some((i) => i.cls === 'ff' || i.cls === '08');
 }
 
 const usbSpeed = (mbps) => (mbps >= 5000 ? 'USB 3' : mbps >= 480 ? 'USB 2' : mbps ? 'USB 1' : '');

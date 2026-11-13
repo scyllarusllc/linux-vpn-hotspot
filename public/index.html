@@ -190,6 +190,7 @@
       <i class="fa-solid fa-power-off" aria-hidden="true"></i>
       <span>Start hotspot<small id="hero-start-note"></small></span>
     </button>
+    <a class="hero-diag" id="hotspot-link" href="#hotspot" hidden><i class="fa-solid fa-pen" aria-hidden="true"></i>Change the hotspot name or password first</a>
     <button type="button" class="hero-fix" id="usb-fix" hidden title="Switches a USB Wi-Fi adapter out of CDROM mode (installs usb_modeswitch)">
       <i class="fa-brands fa-usb" aria-hidden="true"></i>Only one Wi-Fi card found? Fix USB Wi-Fi adapter
     </button>
@@ -294,7 +295,7 @@
   <h2><i class="fa-solid fa-list-check" aria-hidden="true"></i>Flow</h2>
   <ol class="steps" id="steps"></ol>
 
-  <h2><i class="fa-solid fa-wifi" aria-hidden="true"></i>Hotspot</h2>
+  <h2 id="hotspot"><i class="fa-solid fa-wifi" aria-hidden="true"></i>Hotspot</h2>
   <p class="state" id="hotspot-state"></p>
   <form id="form">
     <label>SSID <input name="ssid" value="Omarchy-Hotspot" required></label>
@@ -491,6 +492,9 @@ $('hero-start').addEventListener('click', () => {
   $('form').requestSubmit();
 });
 
+// The jump from the hero lands on the form with the SSID ready to type.
+$('hotspot-link').addEventListener('click', () => setTimeout(() => $('form').elements.ssid.focus({ preventScroll: true }), 300));
+
 $('stop').addEventListener('click', () => busy(async () => {
   await api('POST', '/api/stop');
   message('Hotspot stopped.', 'ok');
@@ -613,6 +617,8 @@ function controls() {
   $('stop').hidden = !on;
   // The big hero button: only when we know the hotspot is off (not while still checking).
   $('hero-start').hidden = !st || on;
+  // Before the first start, the name and password are what people want to set: jump to the form.
+  $('hotspot-link').hidden = $('hero-start').hidden;
   // Shown only after Start failed, where the usual cause is a missing second card.
   $('switch-cards').hidden = $('hero-start').hidden;
   $('usb-fix').hidden = $('hero-start').hidden || !ui.heroNote?.startsWith('Failed');

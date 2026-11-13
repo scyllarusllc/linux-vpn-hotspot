@@ -173,6 +173,7 @@ Hover any node for details. Sampled in the background by `src/insights.js`:
 | Signal hunt | `/hunt`: live signal once a second in big type, best spot so far, 60 s sparkline and optional Geiger-style beeps. Opened on a phone on the hotspot, it follows that phone |
 | Saved settings | The hotspot form (SSID, password, gateway, band) is saved to SQLite (`meta` key `hotspot.settings`) on Start and prefilled on load. An empty password reuses the saved one, so phones keep working after a restart. On first run the running hotspot's settings are adopted |
 | Firewall check | ufw rules are per interface name, so a USB card that comes back under a new name (another port, a replug) blocks DHCP and phones show "couldn't get IP address". The homepage pops up a modal listing the missing rules with a **Fix firewall** button (root, one password dialog) that adds them and re-points the nft rules at the card |
+| Wi-Fi card check | `/wifi-check`, linked from the homepage when Start finds only one card: the USB adapter, the driver that took it (or failed to), what the kernel logged for its port, rfkill and NetworkManager state, with what to do. **Replug in software** (root) makes the driver try again; adapters in CDROM mode get the mode switch |
 | Log | `/log`: timeline of devices connecting and disconnecting (with how long they stayed), hotspot start/stop, card swaps, proxy changes, pauses, renames and proxy rejections. Filter by type, device, range or text; remote admin actions note the client IP. Stored in the `events` table, kept 30 days |
 
 
