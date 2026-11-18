@@ -5,7 +5,7 @@
 
 import { readFile, readdir, readlink } from 'node:fs/promises';
 import { basename, join } from 'node:path';
-import { asRoot, hasCommand, supportsAp, tryCmd } from './system.js';
+import { asRoot, hasCommand, sh, supportsAp, tryCmd } from './system.js';
 
 const USB = '/sys/bus/usb/devices';
 const NET = '/sys/class/net';
@@ -213,7 +213,11 @@ export function diagnose(data) {
     findings,
     adapters: adapters.map((d) => d.port),
     cards: data.wifi.map((w) => ({ ...w, usb: Boolean(w.usbPort), state: nmWifi.find((n) => n.device === w.device)?.state ?? null })),
-    usb: data.usb.map((d) => ({ ...d, speedName: usbSpeed(d.speed), drivers: [...new Set(d.interfaces.map((i) => i.driver).filter(Boolean))] })),
+    usb: data.usb.map((d) => ({
+      ...d, speedName: usbSpeed(d.speed), drivers: [...new Set(d.interfaces.map((i) => i.driver).filter(Boolean))],
+      // No driver attached because one tried and gave up: say which, instead of a bare "none".
+      failedDriver: kernelLinesFor(data.kernel, d.port).map((l) => l.match(/probe with driver (\S+) failed/)?.[1]).filter(Boolean).at(-1) ?? null,
+    })),
   };
 }
 
@@ -224,4 +228,40 @@ export async function replugUsb(port) {
   }
   const f = JSON.stringify(join(USB, port, 'authorized'));
   await asRoot(`echo 0 > ${f}\nsleep 1\necho 1 > ${f}\nsleep 5`);
+}
+
+// "linux-omarchy 7.2.8-9 -> 7.2.15-1" lines from checkupdates, kept for the kernel and firmware packages.
+export function parseUpdates(text, wanted) {
+  return String(text ?? '').split('\n').flatMap((l) => {
+    const m = l.trim().match(/^(\S+) (\S+) -> (\S+)$/);
+    return m && wanted(m[1]) ? [{ name: m[1], from: m[2], to: m[3] }] : [];
+  });
+}
+
+// Driver fixes arrive with kernel (and firmware) updates. checkupdates syncs a private copy of the
+// package lists (no root, the system isn't touched) but needs the network, so it is cached for 10 minutes.
+const UPDATES_MS = 10 * 60_000;
+let updatesCache = null;
+
+export function kernelUpdates() {
+  if (updatesCache && Date.now() - updatesCache.at < UPDATES_MS) return updatesCache.result;
+  const result = (async () => {
+    const running = (await tryCmd('uname', ['-r']))?.trim() ?? null;
+    const owners = running ? await tryCmd('pacman', ['-Qqo', `/usr/lib/modules/${running}`]) : null;
+    const kernel = owners?.split('\n').find((n) => n && !n.endsWith('-headers')) ?? null;
+    if (!(await hasCommand('checkupdates'))) {
+      return { running, kernel, updates: [], error: 'checkupdates is missing: sudo pacman -S pacman-contrib' };
+    }
+    const wanted = (n) => n === kernel || n.startsWith('linux-firmware');
+    try {
+      // Exit status 2 means "no updates", which execFile reports as an error.
+      const out = await sh('checkupdates', []).catch((err) => { if (err.code === 2) return ''; throw err; });
+      return { running, kernel, updates: parseUpdates(out, wanted), error: null, at: Date.now() };
+    } catch (err) {
+      updatesCache = null; // try again on the next Re-check
+      return { running, kernel, updates: [], error: `Could not check for updates: ${err.stderr?.trim() || err.message}` };
+    }
+  })();
+  updatesCache = { at: Date.now(), result };
+  return result;
 }

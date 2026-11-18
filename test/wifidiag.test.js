@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { diagnose, isWifiCandidate, kernelLinesFor } from '../src/wifidiag.js';
+import { diagnose, isWifiCandidate, kernelLinesFor, parseUpdates } from '../src/wifidiag.js';
 
 // A Realtek RTL8852BU whose driver probe failed, after an earlier attempt on the same port.
 const KERNEL = `usb 4-2: new SuperSpeed USB device number 1 using xhci_hcd
@@ -52,6 +52,8 @@ test('failed driver probe: names the driver, the first error and a firmware mism
   assert.match(f.detail, /rtw89_8852bu .*error -12.*"failed to recognize firmware elements".*don't match/);
   assert.match(f.fix, /pacman -Syu/);
   assert.deepEqual(d.adapters, ['4-2']);
+  assert.equal(d.usb.find((u) => u.port === '4-2').failedDriver, 'rtw89_8852bu');
+  assert.equal(d.usb.find((u) => u.port === '3-5').failedDriver, null);
 });
 
 test('adapter working as a Wi-Fi card: two cards, all ok', () => {
@@ -74,4 +76,14 @@ test('CDROM mode, nothing plugged in, rfkill and unmanaged cards', () => {
     nm: [{ device: 'wlp0s20f3', state: 'unmanaged' }] });
   assert.ok(off.findings.some((f) => f.fix === 'Run: rfkill unblock wifi'));
   assert.ok(off.findings.some((f) => f.fix === 'Run: nmcli dev set wlp0s20f3 managed yes'));
+});
+
+test('updates: only the running kernel and firmware packages', () => {
+  const out = 'firefox 140.0-1 -> 141.0-1\nlinux-omarchy 7.2.8-9 -> 7.2.15-1\nlinux-firmware-realtek 20260916-1 -> 20261012-1\nlinux-lts 6.18.57-2 -> 6.18.60-1\n';
+  const wanted = (n) => n === 'linux-omarchy' || n.startsWith('linux-firmware');
+  assert.deepEqual(parseUpdates(out, wanted), [
+    { name: 'linux-omarchy', from: '7.2.8-9', to: '7.2.15-1' },
+    { name: 'linux-firmware-realtek', from: '20260916-1', to: '20261012-1' },
+  ]);
+  assert.deepEqual(parseUpdates('', wanted), []);
 });

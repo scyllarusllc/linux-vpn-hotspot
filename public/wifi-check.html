@@ -40,6 +40,7 @@
   .finding.fail { border-left-color: var(--fail); } .finding.fail h3 i { color: var(--fail); }
   .finding h3 { font-size: 15px; margin: 0 0 4px; }
   .finding p { margin: 4px 0; }
+  .finding ul { margin: 4px 0; padding-left: 20px; }
   .finding .fix { color: var(--text); }
   .finding .fix b { color: var(--dim); font-weight: 600; }
   .finding details { margin-top: 6px; color: var(--dim); }
@@ -74,6 +75,7 @@
   <div id="msg" role="status"></div>
 
   <h2><i class="fa-solid fa-list-check" aria-hidden="true"></i>Findings</h2>
+  <div id="updates"><div class="finding"><h3><i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i>Checking for kernel and firmware updates…</h3></div></div>
   <div id="findings"></div>
 
   <h2><i class="fa-solid fa-wifi" aria-hidden="true"></i>Wi-Fi cards Linux sees</h2>
@@ -135,9 +137,31 @@ function render(d) {
   $('usb').innerHTML = d.usb.map((u) => `<tr${d.adapters.includes(u.port) ? ' class="wifi"' : ''}>
     <td class="mono">${esc(u.port)}</td><td class="mono">${esc(u.vendor)}:${esc(u.product)}</td>
     <td>${esc(u.name || '?')}${d.adapters.includes(u.port) ? ' <span class="dim">· Wi-Fi adapter</span>' : ''}</td>
-    <td>${esc(u.speedName)}</td><td class="mono">${u.drivers.length ? esc(u.drivers.join(', ')) : '<span class="dim">none</span>'}</td></tr>`).join('')
+    <td>${esc(u.speedName)}</td><td class="mono">${u.drivers.length ? esc(u.drivers.join(', '))
+      : u.failedDriver ? `<span style="color:var(--fail)">${esc(u.failedDriver)} failed to start</span>` : '<span class="dim">none</span>'}</td></tr>`).join('')
     || '<tr><td colspan="5" class="dim">No USB devices</td></tr>';
 }
+
+// Driver bugs are fixed by kernel / firmware updates, so a waiting one is worth knowing about.
+// Loaded on its own: it needs the network and can take a few seconds.
+function renderUpdates(u) {
+  const list = u.updates.map((x) => `<li><span class="mono">${esc(x.name)}</span> ${esc(x.from)} → <b>${esc(x.to)}</b></li>`).join('');
+  const kernelWaits = u.updates.some((x) => x.name === u.kernel);
+  $('updates').innerHTML = u.error
+    ? `<div class="finding warn"><h3><i class="fa-solid fa-${icons.warn}" aria-hidden="true"></i>Check: kernel and firmware updates</h3>
+        <p>${esc(u.error)}</p></div>`
+    : u.updates.length
+      ? `<div class="finding warn"><h3><i class="fa-solid fa-download" aria-hidden="true"></i>${kernelWaits ? 'Kernel update waiting' : 'Firmware update waiting'}</h3>
+          <p>Running kernel <span class="mono">${esc(u.running)}</span>${u.kernel ? ` (package <span class="mono">${esc(u.kernel)}</span>)` : ''}. Waiting:</p>
+          <ul class="mono">${list}</ul>
+          <p class="fix"><b>What to do:</b> driver fixes come with these updates. Run <span class="mono">sudo pacman -Syu</span>,
+            reboot${kernelWaits ? ' (the new kernel only runs after a reboot)' : ''}, then Re-check.</p></div>`
+      : `<div class="finding ok"><h3><i class="fa-solid fa-${icons.ok}" aria-hidden="true"></i>Kernel and firmware are up to date</h3>
+          <p>Running <span class="mono">${esc(u.running)}</span>${u.kernel ? ` (<span class="mono">${esc(u.kernel)}</span>)` : ''}; no newer kernel or
+            firmware packages. If the driver still fails, try another kernel (e.g. linux-lts).</p></div>`;
+}
+const checkUpdates = () => api('GET', '/api/wifi-check/updates').then(renderUpdates,
+  (e) => renderUpdates({ updates: [], error: e.message }));
 
 async function busy(fn) {
   const buttons = document.querySelectorAll('button');
@@ -148,7 +172,7 @@ async function busy(fn) {
 
 const check = () => busy(async () => render(await api('GET', '/api/wifi-check')));
 
-$('recheck').addEventListener('click', () => { say(''); check(); });
+$('recheck').addEventListener('click', () => { say(''); check(); checkUpdates(); });
 $('findings').addEventListener('click', (e) => {
   const b = e.target.closest('button[data-action]');
   if (!b) return;
@@ -164,6 +188,7 @@ $('findings').addEventListener('click', (e) => {
 
 api('GET', '/api/whoami').then((w) => { $('admin-field').hidden = w.local; }).catch(() => {});
 check();
+checkUpdates();
 </script>
 </body>
 </html>

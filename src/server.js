@@ -14,7 +14,7 @@ import { runFlow } from './flow.js';
 import QRCode from 'qrcode';
 import { swapCards, switchRoles, ufwScript } from './swap.js';
 import { fixUsbWifi } from './usbmode.js';
-import { diagnose, gatherWifiDiag, replugUsb } from './wifidiag.js';
+import { diagnose, gatherWifiDiag, kernelUpdates, replugUsb } from './wifidiag.js';
 import { DEFAULT_BYPASS, getBypass, parseBypass, setBypass } from './bypass.js';
 import { addProxies, getProxy, listProxies, recordTest, removeProxy, selectProxy, updateProxy } from './proxies.js';
 import { firewallCheck } from './firewall.js';
@@ -354,6 +354,8 @@ const routes = {
   },
   // Why only one Wi-Fi card is visible: USB bus, drivers, kernel log, rfkill, NetworkManager (no root).
   'GET /api/wifi-check': async () => diagnose(await gatherWifiDiag()),
+  // Pending kernel / firmware updates (checkupdates, cached 10 min); separate because it needs the network.
+  'GET /api/wifi-check/updates': () => kernelUpdates(),
   // Software replug of one USB adapter, so its driver tries again. Needs root.
   'POST /api/wifi-check/replug': async (body, _who, _url, req) => {
     await withRoot(() => replugUsb(String(body.port ?? '')));
