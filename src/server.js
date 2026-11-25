@@ -356,11 +356,12 @@ const routes = {
   'GET /api/wifi-check': async () => diagnose(await gatherWifiDiag()),
   // Pending kernel / firmware updates (checkupdates, cached 10 min); separate because it needs the network.
   'GET /api/wifi-check/updates': () => kernelUpdates(),
-  // Software replug of one USB adapter, so its driver tries again. Needs root.
+  // Software replug of one USB adapter, so its driver tries again (compact: free and compact memory first). Needs root.
   'POST /api/wifi-check/replug': async (body, _who, _url, req) => {
-    await withRoot(() => replugUsb(String(body.port ?? '')));
-    logEvent('server', `USB device on port ${body.port} replugged in software`, req);
-    return diagnose(await gatherWifiDiag());
+    let replug;
+    await withRoot(async () => { replug = await replugUsb(String(body.port ?? ''), { compact: Boolean(body.compact) }); });
+    logEvent('server', `USB device on port ${body.port} replugged in software${body.compact ? ' after compacting memory' : ''}: ${replug.text}`, req);
+    return { ...diagnose(await gatherWifiDiag()), replug };
   },
   // Everything the map shows beyond /api/devices and /api/status, keyed by MAC.
   'GET /api/map': async () => {

@@ -97,10 +97,12 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 const icons = { ok: 'circle-check', warn: 'triangle-exclamation', fail: 'circle-xmark' };
 const words = { ok: 'OK', warn: 'Check', fail: 'Problem' };
-// Fix buttons per finding: replug re-probes the adapter, modeswitch is the homepage's CDROM-mode fix.
+// Fix buttons per finding: replug re-probes the adapter, compact frees memory first (driver error -12), modeswitch is the homepage's CDROM-mode fix.
 const actions = {
   replug: { label: 'Replug in software', icon: 'plug-circle-bolt', path: '/api/wifi-check/replug',
-    wait: 'Replugging… approve the password dialog on the laptop (about 10 seconds).' },
+    wait: 'Replugging… approve the password dialog on the laptop, then wait for the driver (up to 30 seconds).' },
+  compact: { label: 'Free memory and replug', icon: 'memory', path: '/api/wifi-check/replug', body: { compact: true },
+    wait: 'Freeing memory and replugging… approve the password dialog on the laptop, then wait for the driver (up to 30 seconds).' },
   modeswitch: { label: 'Switch to Wi-Fi mode', icon: 'wand-magic-sparkles', path: '/api/usb-wifi/fix',
     wait: 'Switching the adapter… approve the password dialog on the laptop (may take up to a minute).' },
 };
@@ -179,10 +181,10 @@ $('findings').addEventListener('click', (e) => {
   const a = actions[b.dataset.action];
   say(a.wait);
   busy(async () => {
-    const res = await api('POST', a.path, { port: b.dataset.port });
-    // The replug answers with a fresh diagnosis; the CDROM fix doesn't, so check again.
+    const res = await api('POST', a.path, { port: b.dataset.port, ...a.body });
+    // The replug answers with a fresh diagnosis and what the driver did; the CDROM fix doesn't, so check again.
     render(res.verdict ? res : await api('GET', '/api/wifi-check'));
-    say('Done. The result is above.', 'ok');
+    say(res.replug?.text ?? 'Done. The result is above.', res.replug && !res.replug.ok ? 'fail' : 'ok');
   });
 });
 

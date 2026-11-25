@@ -16,6 +16,8 @@ const WIFI_NAME = /wlan|wireless|wi-?fi|802\.11|\bwifi\b/i;
 const WIFI_VENDORS = new Set(['0bda', '148f', '0e8d', '2357', '7392', '0cf3', '13b1', '2001', '0846', '0b05', '2c4e', '35bc']);
 // "Bus 4, port 2" style ids from sysfs, e.g. 4-2 or 3-1.4 (behind a hub).
 const PORT = /^\d+-\d+(\.\d+)*$/;
+// "kworker/6:1: page allocation failure: order:8, mode:..." - the kernel had no unbroken block of 4 KiB << order.
+const ALLOC = /page allocation failure: order:(\d+)/;
 
 const read = (path) => readFile(path, 'utf8').then((s) => s.trim(), () => null);
 const driverOf = (path) => readlink(join(path, 'driver')).then((l) => basename(l), () => null);
@@ -71,14 +73,34 @@ async function nmDevices() {
     .map(([device, , state]) => ({ device, state }));
 }
 
+// Largest free unbroken memory block as a buddy order (0 = 4 KiB, 8 = 1 MiB), from /proc/buddyinfo.
+// The DMA zone is skipped: it is tiny and drivers don't allocate from it.
+export function maxFreeOrder(buddyinfo) {
+  let max = -1;
+  for (const l of String(buddyinfo ?? '').split('\n')) {
+    const m = l.match(/zone\s+(\S+)\s+([\d\s]+)$/);
+    if (!m || m[1] === 'DMA') continue;
+    m[2].trim().split(/\s+/).forEach((n, i) => { if (Number(n) > 0) max = Math.max(max, i); });
+  }
+  return max < 0 ? null : max;
+}
+
+const memory = async () => ({
+  maxOrder: maxFreeOrder(await read('/proc/buddyinfo')),
+  uptime: Number((await read('/proc/uptime'))?.split(' ')[0]) || null,
+});
+
 export async function gatherWifiDiag() {
-  const [usb, wifi, rf, nm, kernel, modeswitch] = await Promise.all([
+  const [usb, wifi, rf, nm, kernel, modeswitch, mem] = await Promise.all([
     usbDevices(), wifiInterfaces(), rfkill(), nmDevices(),
     tryCmd('journalctl', ['-k', '-b', '-o', 'cat', '--no-pager', '-n', '3000']),
-    hasCommand('usb_modeswitch'),
+    hasCommand('usb_modeswitch'), memory(),
   ]);
-  return { usb, wifi, rfkill: rf, nm, kernel, modeswitch };
+  return { usb, wifi, rfkill: rf, nm, kernel, modeswitch, memory: mem };
 }
+
+export const blockSize = (order) => ((4 << order) >= 1024 ? `${(4 << order) / 1024} MiB` : `${4 << order} KiB`);
+const days = (s) => (s >= 86400 ? `${Math.floor(s / 86400)} day${s >= 172800 ? 's' : ''}` : `${Math.max(1, Math.floor(s / 3600))} h`);
 
 // Kernel lines about one USB port since it was last plugged in ("usb 4-2: ..." and "drv 4-2:1.0: ...").
 export function kernelLinesFor(log, port) {
@@ -87,7 +109,10 @@ export function kernelLinesFor(log, port) {
   const mine = new RegExp(`(^|\\s)${esc}(:\\d+\\.\\d+)?:\\s`);
   const plugged = new RegExp(`^usb ${esc}: new .*USB device number`, 'i');
   const start = lines.findLastIndex((l) => plugged.test(l));
-  return lines.slice(Math.max(start, 0)).filter((l) => mine.test(l));
+  const slice = lines.slice(Math.max(start, 0));
+  // A memory allocation failure carries no port, but one between the plug and this port's failed probe is the cause.
+  const probe = slice.findLastIndex((l) => mine.test(l) && /probe with driver \S+ failed/.test(l));
+  return slice.filter((l, i) => mine.test(l) || (i < probe && ALLOC.test(l)));
 }
 
 // A USB device that is (or wants to be) a Wi-Fi adapter. Bluetooth and hubs are never.
@@ -127,6 +152,25 @@ function adapterFinding(d, data) {
       ...base, level: 'fail', action: 'replug',
       detail: 'The driver could not find the firmware file it needs.',
       fix: 'Install or update the firmware (Arch: sudo pacman -Syu linux-firmware), then replug the adapter.',
+    };
+  }
+  const alloc = log.map((l) => l.match(ALLOC)).filter(Boolean).at(-1);
+  if (probe && (alloc || probe[2] === '-12')) {
+    // -12 is ENOMEM. The firmware lines around it only show where the driver was when the allocation failed.
+    const order = alloc ? Number(alloc[1]) : null;
+    const { maxOrder = null, uptime = null } = data.memory ?? {};
+    const now = order === null || maxOrder === null ? ''
+      : maxOrder >= order ? ` Right now a ${blockSize(order)} block is free, so a replug should work.`
+        : ` Right now the biggest free block is ${blockSize(maxOrder)}.`;
+    return {
+      ...base, level: 'fail', action: 'compact',
+      detail: `The driver ${probe[1]} found the adapter but could not get the memory to start it (error -12, out of memory)` +
+        `${order !== null ? `: it needs one unbroken ${blockSize(order)} block and the kernel had none` : ''}. ` +
+        `There is free RAM, but${uptime ? ` after ${days(uptime)} of uptime` : ''} it is broken into small pieces (memory fragmentation). ` +
+        'This is not a firmware or driver mismatch: the firmware lines only show where the driver was when it ran out.' + now,
+      fix: 'Press "Free memory and replug": it drops the file cache, compacts memory, then replugs the adapter. ' +
+        'If it still fails, close big programs (browser, VMs) and press it again; a reboot always clears it. ' +
+        'Once the adapter has started it keeps its memory, so this only matters when it is plugged in.',
     };
   }
   if (probe) {
@@ -221,13 +265,51 @@ export function diagnose(data) {
   };
 }
 
+// What a replug led to, from the kernel log since it started: the adapter came up as a Wi-Fi card,
+// its driver failed again, or nothing yet. Some adapters (RTL8852BU) re-enumerate on another port
+// (USB 2 first, then USB 3), so the adapter is found by vendor:product, not by port.
+async function probeResult(id, since) {
+  for (const w of await wifiInterfaces()) {
+    if (!w.usbPort) continue;
+    const dir = join(USB, w.usbPort);
+    if (`${await read(join(dir, 'idVendor'))}:${await read(join(dir, 'idProduct'))}` === id) return { ok: true, device: w.device };
+  }
+  const log = await tryCmd('journalctl', ['-k', '-o', 'cat', '--no-pager', '--since', `@${Math.floor(since / 1000)}`]);
+  const fail = log?.match(/probe with driver (\S+) failed with error (-?\d+)/);
+  if (!fail) return null;
+  const alloc = log.match(ALLOC);
+  return { ok: false, driver: fail[1], error: Number(fail[2]), order: alloc ? Number(alloc[1]) : null };
+}
+
+const delay = (ms) => new Promise((r) => setTimeout(r, ms));
+
 // Software replug: de-authorize and re-authorize the USB device, so the kernel probes it again.
-export async function replugUsb(port) {
-  if (!PORT.test(port ?? '') || (await read(join(USB, port, 'idVendor'))) === null) {
+// compact first frees the file cache and compacts memory, for drivers that failed with error -12
+// because no large unbroken block was free. Waits up to 25 s for the driver's verdict.
+export async function replugUsb(port, { compact = false } = {}) {
+  const dir = join(USB, port ?? '');
+  const id = `${await read(join(dir, 'idVendor'))}:${await read(join(dir, 'idProduct'))}`;
+  if (!PORT.test(port ?? '') || id.startsWith('null')) {
     throw Object.assign(new Error('That USB device is not plugged in any more. Re-check.'), { status: 404 });
   }
-  const f = JSON.stringify(join(USB, port, 'authorized'));
-  await asRoot(`echo 0 > ${f}\nsleep 1\necho 1 > ${f}\nsleep 5`);
+  const before = maxFreeOrder(await read('/proc/buddyinfo'));
+  const f = JSON.stringify(join(dir, 'authorized'));
+  const free = 'sync\necho 3 > /proc/sys/vm/drop_caches\necho 1 > /proc/sys/vm/compact_memory\nsleep 1\n' +
+    'echo 1 > /proc/sys/vm/compact_memory\n';
+  const since = Date.now() - 1000;
+  await asRoot(`${compact ? free : ''}echo 0 > ${f}\nsleep 1\necho 1 > ${f}`);
+  const after = maxFreeOrder(await read('/proc/buddyinfo'));
+  const mem = compact && after !== null ? ` Memory compacted: biggest free block ${before !== null ? `${blockSize(before)} → ` : ''}${blockSize(after)}.` : '';
+
+  let res = null;
+  for (let i = 0; i < 25 && !res; i++) { await delay(1000); res = await probeResult(id, since); }
+  if (!res) return { ok: false, text: `The adapter was replugged, but its driver said nothing in 25 seconds.${mem} Re-check in a moment.` };
+  if (res.ok) return { ok: true, text: `The adapter started: it is Wi-Fi card ${res.device}.${mem}` };
+  if (res.error === -12) {
+    return { ok: false, text: `The driver ran out of memory again${res.order !== null ? ` (it needs one unbroken ${blockSize(res.order)} block)` : ''}.${mem} ` +
+      'Close big programs (browser, VMs) and press "Free memory and replug" again, or reboot.' };
+  }
+  return { ok: false, text: `The driver ${res.driver} failed again (error ${res.error}). See the finding above.${mem}` };
 }
 
 // "linux-omarchy 7.2.8-9 -> 7.2.15-1" lines from checkupdates, kept for the kernel and firmware packages.
